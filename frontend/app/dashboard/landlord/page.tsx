@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 import {
   getLandlordDashboardStats,
   listLandlordProperties,
@@ -44,6 +45,9 @@ import {
 } from "@/lib/landlordPropertiesApi";
 
 export default function LandlordDashboard() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
+  const firstName = user?.name?.trim().split(/\s+/)[0] || "there";
   const [activeTab, setActiveTab] = useState<"properties" | "applications">(
     "properties",
   );
@@ -177,7 +181,7 @@ export default function LandlordDashboard() {
 
       <DashboardSidebar
         role="landlord"
-        userInfo={{ name: "Chief Okonkwo", roleLabel: "Landlord" }}
+        userInfo={{ name: userName, roleLabel: "Landlord" }}
       />
 
       <main id="main-content" className="min-h-screen pt-20 lg:ml-64">
@@ -185,7 +189,7 @@ export default function LandlordDashboard() {
           <div className="mb-6 flex flex-col gap-4 md:mb-8 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl font-bold text-foreground md:text-3xl lg:text-4xl">
-                Welcome back, Chief!
+                Welcome back, {firstName}!
               </h1>
               <p className="mt-2 text-sm text-muted-foreground md:text-base lg:text-lg">
                 Here&apos;s what&apos;s happening with your properties

@@ -17,8 +17,11 @@ import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { propertyInspectionApi, type InspectorEarnings } from "@/lib/propertyInspectionApi";
 import { useFeatureFlag } from "@/lib/featureFlags";
 import { formatDate } from "@/lib/date";
+import useAuthStore from "@/store/useAuthStore";
 
 export default function EarningsPage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const isEnabled = useFeatureFlag("INSPECTOR_DASHBOARD_ENABLED");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +86,7 @@ export default function EarningsPage() {
 
       <DashboardSidebar
         role="inspector"
-        userInfo={{ name: "Inspector Chidi", roleLabel: "Property Inspector" }}
+        userInfo={{ name: userName, roleLabel: "Property Inspector" }}
       />
 
       {/* Main Content */}

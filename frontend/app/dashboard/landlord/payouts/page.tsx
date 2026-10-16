@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 import { PayoutDrillDown } from "@/components/landlord/payout-drill-down";
 import {
   getPayoutSchedule,
@@ -58,6 +59,8 @@ function StatusBadge({ status }: { status: PayoutStatus }) {
 }
 
 export default function LandlordPayoutSchedulePage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -163,7 +166,7 @@ export default function LandlordPayoutSchedulePage() {
 
       <DashboardSidebar
         role="landlord"
-        userInfo={{ name: "Adebayo Okonkwo", roleLabel: "Landlord" }}
+        userInfo={{ name: userName, roleLabel: "Landlord" }}
       />
 
       <main id="main-content" className="min-h-screen pt-20 lg:ml-64">

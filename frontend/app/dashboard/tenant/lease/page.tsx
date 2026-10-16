@@ -26,6 +26,7 @@ import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { formatDate } from "@/lib/date";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 import { LeaseESignature } from "@/components/properties/LeaseESignature";
 import {
   searchEmployers,
@@ -135,6 +136,8 @@ function DocPreviewModal({ doc, onClose }: DocPreviewModalProps) {
 }
 
 export default function TenantLeasePage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const [leaseDetails, setLeaseDetails] = useState<TenantLeaseDetails | null>(
     null,
   );
@@ -244,7 +247,7 @@ export default function TenantLeasePage() {
         <DashboardHeader />
         <DashboardSidebar
           role="tenant"
-          userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+          userInfo={{ name: userName, roleLabel: "Tenant" }}
         />
         <main id="main-content" className="lg:ml-64 min-h-screen pt-20">
           <div className="p-8 flex items-center justify-center">
@@ -261,7 +264,7 @@ export default function TenantLeasePage() {
         <DashboardHeader />
         <DashboardSidebar
           role="tenant"
-          userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+          userInfo={{ name: userName, roleLabel: "Tenant" }}
         />
         <main id="main-content" className="lg:ml-64 min-h-screen pt-20">
           <div className="p-8">
@@ -288,7 +291,7 @@ export default function TenantLeasePage() {
 
       <DashboardSidebar
         role="tenant"
-        userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+        userInfo={{ name: userName, roleLabel: "Tenant" }}
       />
 
       <main id="main-content" className="lg:ml-64 min-h-screen pt-20">

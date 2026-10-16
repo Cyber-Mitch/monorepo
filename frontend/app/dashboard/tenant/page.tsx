@@ -17,6 +17,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { PropertyCard } from "@/components/property-card";
+import useAuthStore from "@/store/useAuthStore";
 import { PropertyCardSkeleton } from "@/components/property-card-skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +55,9 @@ type PaymentItem =
   | (PaymentHistoryItem & { month: string });
 
 export default function TenantDashboard() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "";
+  const firstName = user?.name?.trim().split(/\s+/)[0] || "there";
   const isStakingEnabled = useFeatureFlag("STAKING_ENABLED");
   const [activeTab, setActiveTab] = useState<"overview" | "payments" | "saved">(
     "overview",
@@ -277,14 +281,14 @@ export default function TenantDashboard() {
 
       <DashboardSidebar
         role="tenant"
-        userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+          userInfo={{ name: userName, roleLabel: "Tenant" }}
       />
 
       <main id="main-content" className="min-h-screen pt-20 lg:ml-64">
         <div className="p-4 md:p-6 lg:p-8">
           <div className="mb-6 md:mb-8">
             <h1 className="text-2xl font-bold text-foreground md:text-3xl lg:text-4xl">
-              Welcome back, Ngozi!
+                Welcome back, {firstName}!
             </h1>
             {leaseLoading ? (
               <LoadingState

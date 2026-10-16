@@ -23,8 +23,11 @@ import { ReportSubmitForm } from "@/components/inspector/ReportSubmitForm";
 import { getInspectorJobs, type InspectorJob } from "@/lib/inspectorApi";
 import { useFeatureFlag } from "@/lib/featureFlags";
 import { formatDate } from "@/lib/date";
+import useAuthStore from "@/store/useAuthStore";
 
 export default function JobDetailPage({ params }: { params: Promise<{ jobId: string }> }) {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const router = useRouter();
   const resolvedParams = use(params);
   const isEnabled = useFeatureFlag("INSPECTOR_DASHBOARD_ENABLED");
@@ -165,7 +168,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
       <DashboardSidebar
         role="inspector"
-        userInfo={{ name: "Inspector Chidi", roleLabel: "Property Inspector" }}
+        userInfo={{ name: userName, roleLabel: "Property Inspector" }}
       />
 
       {/* Main Content */}

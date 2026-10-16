@@ -23,8 +23,11 @@ import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { JobCard } from "@/components/inspector/JobCard";
 import { propertyInspectionApi, type InspectionJob } from "@/lib/propertyInspectionApi";
 import { useFeatureFlag } from "@/lib/featureFlags";
+import useAuthStore from "@/store/useAuthStore";
 
 export default function InspectorDashboard() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const isEnabled = useFeatureFlag("INSPECTOR_DASHBOARD_ENABLED");
   const [isLoading, setIsLoading] = useState(true);
   const [jobs, setJobs] = useState<InspectionJob[]>([]);
@@ -117,7 +120,7 @@ export default function InspectorDashboard() {
 
       <DashboardSidebar
         role="inspector"
-        userInfo={{ name: "Inspector Chidi", roleLabel: "Property Inspector" }}
+        userInfo={{ name: userName, roleLabel: "Property Inspector" }}
       />
 
       {/* Main Content */}

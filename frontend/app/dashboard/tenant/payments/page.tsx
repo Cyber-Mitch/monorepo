@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar"
+import useAuthStore from "@/store/useAuthStore"
 import {
   getPaymentSchedule,
   getWalletBalance,
@@ -45,6 +46,8 @@ import type { InstalmentInput } from "@/lib/installmentSchedule"
 type ActiveTab = "schedule" | "history"
 
 export default function TenantPaymentsPage() {
+  const user = useAuthStore((state) => state.user)
+  const userName = user?.name ?? user?.email ?? ""
   const [activeTab, setActiveTab] = useState<ActiveTab>("schedule")
   const [walletBalance, setWalletBalance] = useState(0)
   const [paymentSchedule, setPaymentSchedule] = useState<PaymentScheduleItem[]>([])
@@ -228,7 +231,7 @@ export default function TenantPaymentsPage() {
 
       <DashboardSidebar
         role="tenant"
-        userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+        userInfo={{ name: userName, roleLabel: "Tenant" }}
       />
 
       <main id="main-content" className="lg:ml-64 min-h-screen pt-20">

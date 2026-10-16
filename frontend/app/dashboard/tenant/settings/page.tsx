@@ -22,8 +22,11 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar"
+import useAuthStore from "@/store/useAuthStore"
 
 export default function TenantSettingsPage() {
+  const user = useAuthStore((state) => state.user)
+  const userName = user?.name ?? user?.email ?? "User"
   const [activeTab, setActiveTab] = useState<"profile" | "notifications" | "security" | "payment">("profile")
   const [showPassword, setShowPassword] = useState(false)
 
@@ -40,7 +43,7 @@ export default function TenantSettingsPage() {
 
       <DashboardSidebar
         role="tenant"
-        userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+        userInfo={{ name: userName, roleLabel: "Tenant" }}
       />
 
       {/* Main Content */}
@@ -77,7 +80,7 @@ export default function TenantSettingsPage() {
               
               <div className="mb-8 flex items-center gap-6">
                 <div className="flex h-24 w-24 items-center justify-center border-3 border-foreground bg-secondary text-3xl font-bold">
-                  NA
+                  {user?.name?.trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || ""}
                 </div>
                 <div>
                   <Button variant="outline" className="border-3 border-foreground bg-transparent font-bold">
@@ -92,7 +95,8 @@ export default function TenantSettingsPage() {
                   <Label htmlFor="full-name" className="font-bold">Full Name</Label>
                   <Input
                     id="full-name"
-                    defaultValue="Ngozi Adekunle"
+                    key={userName}
+                    defaultValue={user?.name ?? ""}
                     className="border-3 border-foreground bg-background py-5 shadow-[3px_3px_0px_0px_rgba(26,26,26,1)]"
                   />
                 </div>
@@ -260,7 +264,7 @@ export default function TenantSettingsPage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Account Name</p>
-                        <p className="font-bold">Ngozi Adekunle</p>
+                        <p className="font-bold">{userName}</p>
                       </div>
                     </div>
                   </div>

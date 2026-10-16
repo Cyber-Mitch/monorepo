@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 import { DocumentPreviewDialog } from "@/components/tenant/document-preview-dialog";
 import {
   listDocuments,
@@ -131,6 +132,8 @@ function CategoryIcon({ category }: { category: DocumentCategory }) {
 }
 
 export default function DocumentVaultPage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const [documents, setDocuments] = useState<TenantDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +228,7 @@ export default function DocumentVaultPage() {
 
       <DashboardSidebar
         role="tenant"
-        userInfo={{ name: "Ngozi Adekunle", roleLabel: "Tenant" }}
+        userInfo={{ name: userName, roleLabel: "Tenant" }}
       />
 
       <main id="main-content" className="min-h-screen pt-20 lg:ml-64">
