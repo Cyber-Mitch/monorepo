@@ -7160,6 +7160,776 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/v1/epoch-rewards/me:
+    get:
+      summary: Get the caller's epoch rewards position
+      description: |
+        Returns the current epoch, what the linked wallet has staked and can claim, and the
+        pool's total staked. `staked` is null when the deployed contract exposes no per-user
+        stake getter. Amounts are decimal strings in token base units. (#1965)
+      operationId: getMyEpochRewards
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Position of the linked wallet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      wallet: { type: string }
+                      currentEpoch: { type: integer }
+                      staked: { type: string, nullable: true }
+                      claimable: { type: string }
+                      totalStaked: { type: string }
+                      epoch:
+                        nullable: true
+                        allOf:
+                          - $ref: '#/components/schemas/EpochRewardsEpoch'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/epochs/{n}:
+    get:
+      summary: Get one epoch
+      description: |
+        Returns an epoch by number. (#1965)
+      operationId: getEpochRewardsEpoch
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: n
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The epoch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/EpochRewardsEpoch'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/stake/prepare:
+    post:
+      summary: Prepare an unsigned stake transaction
+      description: |
+        Builds and simulates a `stake` call for the linked wallet. The caller signs the returned
+        XDR in their wallet and submits it to `/api/v1/epoch-rewards/stake/submit`. (#1965)
+      operationId: prepareEpochRewardsStake
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: string, description: Positive integer in token base units }
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/stake/submit:
+    post:
+      summary: Submit a wallet-signed stake
+      description: |
+        Accepts only a single `stake` call on the epoch rewards contract, with the amount stated
+        in the request, from the caller's linked wallet and signed by it. Anything else is rejected
+        with 400 before broadcast. (#1965)
+      operationId: submitEpochRewardsStake
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signedXdr, amount]
+              properties:
+                signedXdr: { type: string, description: Base64 signed transaction envelope }
+                amount: { type: string, description: The amount that was signed }
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      txHash: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/unstake/prepare:
+    post:
+      summary: Prepare an unsigned unstake transaction
+      description: |
+        Builds and simulates a `unstake` call for the linked wallet. The caller signs the returned
+        XDR in their wallet and submits it to `/api/v1/epoch-rewards/unstake/submit`. (#1965)
+      operationId: prepareEpochRewardsUnstake
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: string, description: Positive integer in token base units }
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/unstake/submit:
+    post:
+      summary: Submit a wallet-signed unstake
+      description: |
+        Accepts only a single `unstake` call on the epoch rewards contract, with the amount stated
+        in the request, from the caller's linked wallet and signed by it. Anything else is rejected
+        with 400 before broadcast. (#1965)
+      operationId: submitEpochRewardsUnstake
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signedXdr, amount]
+              properties:
+                signedXdr: { type: string, description: Base64 signed transaction envelope }
+                amount: { type: string, description: The amount that was signed }
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      txHash: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/claim/prepare:
+    post:
+      summary: Prepare an unsigned claim transaction
+      description: |
+        Builds a `claim` call for the linked wallet. Returns 400 when nothing is claimable. (#1965)
+      operationId: prepareEpochRewardsClaim
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/epoch-rewards/claim/submit:
+    post:
+      summary: Submit a wallet-signed claim
+      description: |
+        Accepts only a single `claim` call from the caller's linked wallet, signed by it. (#1965)
+      operationId: submitEpochRewardsClaim
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signedXdr]
+              properties:
+                signedXdr: { type: string, description: Base64 signed transaction envelope }
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      txHash: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/epoch-rewards/fund:
+    post:
+      summary: Fund the current epoch's reward pool
+      description: |
+        Adds `amount` to the current epoch's pool, signed with the admin key. Requires
+        `rewards:manage`. (#1965)
+      operationId: fundEpochRewards
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: string, description: Positive integer in token base units }
+      responses:
+        '201':
+          description: Funded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      epoch: { type: integer }
+                      amount: { type: string }
+                      txHash: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/epoch-rewards/seal:
+    post:
+      summary: Seal the current epoch
+      description: |
+        Seals the current epoch if it has ended, freezing its pool and total staked and opening the
+        next epoch. Idempotent: sealing an epoch that is already sealed returns 200 with
+        `already_sealed`, and a sealed epoch is never sealed twice. Returns 409 while the epoch is
+        still running or when the target is not the current epoch (epochs are sealed in order). The
+        same operation runs on a schedule. Requires `rewards:manage`. (#1965)
+      operationId: sealEpochRewards
+      tags:
+        - Epoch Rewards
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetEpoch: { type: integer, minimum: 1, description: Defaults to the current epoch }
+                nextEpochDurationSecs: { type: integer, minimum: 1, description: Defaults to the sealed epoch's duration }
+      responses:
+        '201':
+          description: Sealed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EpochSealOutcome'
+        '200':
+          description: Already sealed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EpochSealOutcome'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/config:
+    get:
+      summary: Get the multisig signers and threshold
+      description: |
+        Signers are wallet addresses; the threshold is how many must approve before a proposal can
+        be executed. Requires `multisig:sign`. (#1972)
+      operationId: getMultisigConfig
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Multisig configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      contractId: { type: string, nullable: true }
+                      signers: { type: array, items: { type: string } }
+                      threshold: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig:
+    get:
+      summary: List multisig proposals
+      description: |
+        Newest first. `ready` is true for a pending proposal that has reached the threshold.
+        `awaitingMySignature` lists pending proposals the caller's linked wallet has not approved.
+        Requires `multisig:sign`. (#1972)
+      operationId: listMultisigProposals
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, executed, cancelled, expired] }
+        - name: target
+          in: query
+          schema: { type: string }
+        - name: function
+          in: query
+          schema: { type: string }
+        - name: awaitingMySignature
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      threshold: { type: integer }
+                      proposals:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MultisigProposal'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/{id}:
+    get:
+      summary: Get a multisig proposal
+      description: |
+        Returns the proposal with its decoded target, function and arguments (large integers as
+        decimal strings). Requires `multisig:sign`. (#1972)
+      operationId: getMultisigProposal
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The proposal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/MultisigProposal'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/propose/prepare:
+    post:
+      summary: Prepare an unsigned proposal
+      description: |
+        Builds a `propose` call from the caller's linked wallet, which must be a signer. The wallet
+        signs the XDR and it is submitted to `/api/v1/admin/multisig/submit`. Requires `multisig:sign`. (#1972)
+      operationId: prepareMultisigPropose
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target, function]
+              properties:
+                target: { type: string, description: Contract the proposal will call }
+                function: { type: string }
+                args:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MultisigArg'
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/{id}/approve/prepare:
+    post:
+      summary: Prepare an unsigned approve
+      description: |
+        Builds a transaction to approve a proposal from the caller's linked wallet, which must be a
+        signer. Returns 409 if the proposal is not pending. Requires `multisig:sign`. (#1972)
+      operationId: prepareMultisigApprove
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/{id}/revoke/prepare:
+    post:
+      summary: Prepare an unsigned revoke
+      description: |
+        Builds a transaction to withdraw the caller's approval of a proposal from the caller's linked wallet, which must be a
+        signer. Returns 409 if the proposal is not pending. Requires `multisig:sign`. (#1972)
+      operationId: prepareMultisigRevoke
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/{id}/execute/prepare:
+    post:
+      summary: Prepare an unsigned execute
+      description: |
+        Builds a transaction to execute a proposal from the caller's linked wallet, which must be a
+        signer. Returns 409 until the approval threshold is reached. Requires `multisig:sign`. (#1972)
+      operationId: prepareMultisigExecute
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Unsigned transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      xdr: { type: string, description: Base64 unsigned transaction envelope }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/v1/admin/multisig/submit:
+    post:
+      summary: Submit a wallet-signed multisig call
+      description: |
+        Submits a `propose`, `approve`, `revoke_approval` or `execute` signed by the caller's linked
+        wallet. The request restates the call's parameters; the backend rejects the signed XDR with 400
+        unless it is a single call on the multisig contract, with exactly those arguments, from that
+        wallet, carrying a valid signature from it. Requires `multisig:sign`. (#1972)
+      operationId: submitMultisigCall
+      tags:
+        - Multisig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [call, signedXdr, target, function]
+                  properties:
+                    call: { type: string, enum: [propose] }
+                    signedXdr: { type: string }
+                    target: { type: string }
+                    function: { type: string }
+                    args:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/MultisigArg'
+                - type: object
+                  required: [call, signedXdr, proposalId]
+                  properties:
+                    call: { type: string, enum: [approve, revoke_approval, execute] }
+                    signedXdr: { type: string }
+                    proposalId: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      call: { type: string }
+                      txHash: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
   /api/v1/tenant/data-export:
     post:
       summary: Request a copy of the caller's personal data
@@ -8193,6 +8963,63 @@ components:
         endTime: { type: integer, description: Unix seconds }
         revocable: { type: boolean }
         revoked: { type: boolean }
+
+    EpochRewardsEpoch:
+      type: object
+      description: One epoch of the epoch_rewards contract. Amounts are decimal strings in token base units; times are unix seconds.
+      properties:
+        epochNumber: { type: integer }
+        startTs: { type: integer }
+        durationSecs: { type: integer }
+        endTs: { type: integer, description: When the epoch may be sealed }
+        sealed: { type: boolean }
+        sealTs: { type: integer, description: 0 while open }
+        totalRewards: { type: string }
+        totalStakedAtSeal: { type: string }
+        carriedForward: { type: string }
+
+    EpochSealOutcome:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          properties:
+            status: { type: string, enum: [sealed, already_sealed] }
+            epoch: { type: integer }
+            txHash: { type: string, description: Present when status is sealed }
+
+    MultisigArg:
+      type: object
+      description: A typed argument of a proposed call.
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [address, symbol, string, bool, bytes32, u32, i32, u64, i64, u128, i128]
+        value:
+          description: A string, boolean or number matching `type`. 64-bit and wider integers are decimal strings; bytes32 is 64 hex characters.
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+
+    MultisigProposal:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [pending, executed, cancelled, expired] }
+        proposer: { type: string }
+        target: { type: string }
+        function: { type: string }
+        args: { type: array, items: {}, description: Decoded arguments; large integers as decimal strings }
+        approvals: { type: array, items: { type: string } }
+        approvalCount: { type: integer }
+        threshold: { type: integer }
+        ready: { type: boolean, description: Pending with enough approvals to execute }
+        approvedByMe: { type: boolean, nullable: true }
+        createdAt: { type: integer }
+        expiresAt: { type: integer }
 
     TenantDataExportStatus:
       type: object
@@ -10517,6 +11344,17 @@ tags:
     description: Whistleblower listing operations
   - name: Vesting
     description: Authenticated vesting schedule operations
+  - name: Epoch Rewards
+    description: |
+      Sealed, epoch-based staking rewards. Stakers stake, unstake and claim by signing in their own
+      wallet; admins fund and seal epochs.
+  - name: Multisig
+    description: |
+      M-of-N approval for privileged on-chain admin actions. When `MULTISIG_ADMIN_ID` is set, the
+      circuit-breaker drain (`propose-drain`, `execute-drain`) and contract-access role assignment
+      (`propose-assign-role`) admin endpoints file a proposal here and answer 202 with a `multisig`
+      object instead of executing; `freeze` stays immediate. The drain endpoints then need a
+      `drainHash` (64 hex characters), as the deal_escrow contract's drain functions take one.
   - name: Deals
     description: Deal management and repayment schedule operations
   - name: Admin

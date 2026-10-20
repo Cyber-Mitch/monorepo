@@ -388,6 +388,10 @@ export class CircuitBreakerAdapter implements SorobanAdapter {
   }
   // ── epoch_rewards (#1965) and multisig_admin (#1972) ───────────────────────
 
+  multisigTargetFor?(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
+    return this.wrappedAdapter.multisigTargetFor?.(contract)
+  }
+
   multisigEnabled?(): boolean {
     return this.wrappedAdapter.multisigEnabled?.() ?? false
   }

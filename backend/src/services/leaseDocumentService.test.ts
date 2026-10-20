@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 
 // Use the local storage provider, in a throwaway directory, so uploads can be read back.
 const storageDir = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const fs = require("node:fs") as typeof import("node:fs");
   const os = require("node:os") as typeof import("node:os");
   const path = require("node:path") as typeof import("node:path");

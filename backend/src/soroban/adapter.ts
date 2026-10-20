@@ -205,6 +205,8 @@ export type MultisigArg =
   | { type: 'symbol'; value: string }
   | { type: 'string'; value: string }
   | { type: 'bool'; value: boolean }
+  /** A BytesN<32>, as 64 hex characters. */
+  | { type: 'bytes32'; value: string }
   | { type: 'u32' | 'i32'; value: number }
   | { type: 'u64' | 'i64' | 'u128' | 'i128'; value: string }
 
@@ -406,6 +408,8 @@ export interface SorobanAdapter {
   // Signers approve with their own wallets (prepare/submit). When the multisig is
   // configured, selected admin operations are proposed through `multisigPropose`,
   // signed by the platform key (which must be a registered signer).
+  /** Contract ids the multisig gate needs to name as the target of a covered admin operation. */
+  multisigTargetFor?(contract: 'dealEscrow' | 'contractAccess'): string | undefined
   multisigEnabled?(): boolean
   multisigContractId?(): string | undefined
   multisigGetConfig?(): Promise<MultisigConfig>

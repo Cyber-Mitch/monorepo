@@ -227,6 +227,10 @@ export class MetricsSorobanAdapter implements SorobanAdapter {
   }
 
   // epoch_rewards (#1965) and multisig_admin (#1972)
+  multisigTargetFor?(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
+    return this.wrapped.multisigTargetFor?.(contract);
+  }
+
   multisigEnabled?(): boolean {
     return this.wrapped.multisigEnabled?.() ?? false;
   }

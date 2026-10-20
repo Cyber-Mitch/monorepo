@@ -199,6 +199,7 @@ import { createTenantSavedPropertiesRouter } from "./routes/tenantSavedPropertie
 import { createVestingRouter, createAdminVestingRouter } from "./routes/vesting.js";
 import { createEpochRewardsRouter, createAdminEpochRewardsRouter } from "./routes/epochRewards.js";
 import { EpochSealJob } from "./jobs/epochSealJob.js";
+import { createMultisigAdminRouter } from "./routes/multisigAdmin.js";
 import {
   PostgresSavedPropertyStore,
   initSavedPropertyStore,
@@ -1073,6 +1074,7 @@ export function createApp() {
     app.use("/api/admin/vesting", createAdminVestingRouter(sorobanAdapter));
     app.use("/api/epoch-rewards", createEpochRewardsRouter(sorobanAdapter, linkedAddressStore));
     app.use("/api/admin/epoch-rewards", createAdminEpochRewardsRouter(sorobanAdapter));
+    app.use("/api/admin/multisig", createMultisigAdminRouter(sorobanAdapter, linkedAddressStore));
     app.use("/api/tenant/credit-score", createTenantCreditScoreRouter());
     app.use("/api/tenant/data-export", createTenantDataExportRouter());
     app.use("/api/admin/credit-score", createAdminCreditScoreRouter());
@@ -1217,6 +1219,7 @@ export function createApp() {
   app.use("/api/v1/admin/vesting", createAdminVestingRouter(sorobanAdapter));
   app.use("/api/v1/epoch-rewards", createEpochRewardsRouter(sorobanAdapter, linkedAddressStore));
   app.use("/api/v1/admin/epoch-rewards", createAdminEpochRewardsRouter(sorobanAdapter));
+  app.use("/api/v1/admin/multisig", createMultisigAdminRouter(sorobanAdapter, linkedAddressStore));
   app.use("/api/v1/tenant/credit-score", createTenantCreditScoreRouter());
   app.use("/api/v1/tenant/data-export", createTenantDataExportRouter());
   app.use("/api/v1/admin/credit-score", createAdminCreditScoreRouter());

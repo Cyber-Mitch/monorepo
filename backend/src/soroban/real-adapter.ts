@@ -3452,6 +3452,10 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
   // ── multisig_admin contract (#1972) ─────────────────────────────────────────
 
+  multisigTargetFor(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
+    return contract === 'dealEscrow' ? this.config.dealEscrowId : this.config.contractAccessId
+  }
+
   multisigEnabled(): boolean {
     return !!this.config.multisigAdminId
   }

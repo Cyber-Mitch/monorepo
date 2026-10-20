@@ -22,6 +22,7 @@ export const multisigArgSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('symbol'), value: z.string().min(1).max(32).regex(/^[A-Za-z0-9_]+$/) }),
   z.object({ type: z.literal('string'), value: z.string().max(1024) }),
   z.object({ type: z.literal('bool'), value: z.boolean() }),
+  z.object({ type: z.literal('bytes32'), value: z.string().regex(/^[0-9a-fA-F]{64}$/, 'Must be 64 hex characters') }),
   z.object({ type: z.literal('u32'), value: z.number().int().min(0).max(4_294_967_295) }),
   z.object({ type: z.literal('i32'), value: z.number().int().min(-2_147_483_648).max(2_147_483_647) }),
   z.object({ type: z.literal('u64'), value: decimal(64, false) }),

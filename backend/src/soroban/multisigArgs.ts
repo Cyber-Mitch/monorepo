@@ -12,6 +12,8 @@ export function encodeMultisigArg(arg: MultisigArg): xdr.ScVal {
       return nativeToScVal(arg.value, { type: 'string' })
     case 'bool':
       return nativeToScVal(arg.value)
+    case 'bytes32':
+      return xdr.ScVal.scvBytes(Buffer.from(arg.value, 'hex'))
     case 'u32':
     case 'i32':
       return nativeToScVal(arg.value, { type: arg.type })

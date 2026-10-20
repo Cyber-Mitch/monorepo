@@ -42,6 +42,27 @@ describe('contract address config', () => {
     expect(addresses.vestingSchedule).toBe(VALID_CONTRACT_ID)
   })
 
+  it('recognizes SOROBAN_EPOCH_REWARDS_ID (issue #1965)', () => {
+    expect(CONTRACT_ENV_VARS.epochRewards).toBe('SOROBAN_EPOCH_REWARDS_ID')
+
+    const addresses = loadContractAddresses({ SOROBAN_EPOCH_REWARDS_ID: VALID_CONTRACT_ID })
+    expect(addresses.epochRewards).toBe(VALID_CONTRACT_ID)
+    expect(() => loadContractAddresses({ SOROBAN_EPOCH_REWARDS_ID: 'nope' })).toThrow(
+      'Invalid Soroban contract ID in SOROBAN_EPOCH_REWARDS_ID',
+    )
+  })
+
+  it('recognizes MULTISIG_ADMIN_ID (issue #1972)', () => {
+    expect(CONTRACT_ENV_VARS.multisigAdmin).toBe('MULTISIG_ADMIN_ID')
+
+    const addresses = loadContractAddresses({ MULTISIG_ADMIN_ID: VALID_CONTRACT_ID })
+    expect(addresses.multisigAdmin).toBe(VALID_CONTRACT_ID)
+    expect(loadContractAddresses({}).multisigAdmin).toBeUndefined()
+    expect(() => loadContractAddresses({ MULTISIG_ADMIN_ID: 'nope' })).toThrow(
+      'Invalid Soroban contract ID in MULTISIG_ADMIN_ID',
+    )
+  })
+
   it('recognizes SOROBAN_MVP_STAKING_POOL_ID (issue #1493)', () => {
     expect(CONTRACT_ENV_VARS.mvpStakingPool).toBe('SOROBAN_MVP_STAKING_POOL_ID')
 

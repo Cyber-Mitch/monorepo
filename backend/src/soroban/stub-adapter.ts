@@ -609,6 +609,10 @@ async requestRentRelease(params: RequestRentReleaseParams): Promise<void> {
      }
 
      // multisig_admin contract (#1972), in memory.
+     multisigTargetFor(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
+          return contract === 'dealEscrow' ? this.config.dealEscrowId : this.config.contractAccessId
+     }
+
      multisigEnabled(): boolean {
           return !!this.config.multisigAdminId
      }
