@@ -22,6 +22,7 @@
 
 import { Keypair, Operation, rpc, TransactionBuilder } from '@stellar/stellar-sdk'
 import { getPool, type PgPoolLike } from '../db.js'
+import { getSigningKeyMaterialStore } from '../models/signingKeyMaterialStore.js'
 import { logger } from '../utils/logger.js'
 
 export type RotationState =
@@ -83,7 +84,6 @@ export class ZeroSignerWindowError extends Error {
 export class SigningKeyRotationService {
   private readonly rpcServer: rpc.Server
   private readonly networkPassphrase: string
-  private readonly keyStores = new Map<KeyType, Map<string, string>>()
 
   constructor(rpcUrl: string, networkPassphrase: string) {
     this.rpcServer = new rpc.Server(rpcUrl)
@@ -815,51 +815,31 @@ export class SigningKeyRotationService {
   }
 
   /**
-   * Store key material securely
-   * In production, this would use KMS/HSM
+   * Store key material in the configured KeyMaterialStore. The Postgres store
+   * encrypts it at rest, so it survives a restart and is shared across instances.
    */
   private async storeKeyMaterial(keyId: string, secret: string, keyType: KeyType): Promise<void> {
-    // For now, store in memory (in production, use KMS)
-    // This is a placeholder for the actual secure storage implementation
-    const keyStore = this.getKeyStore(keyType)
-    keyStore.set(keyId, secret)
+    await getSigningKeyMaterialStore().put(keyId, keyType, secret)
   }
 
   /**
    * Retrieve key material (public for integration with signing services)
    */
   async retrieveKeyMaterial(keyId: string, keyType: KeyType): Promise<string> {
-    const keyStore = this.getKeyStore(keyType)
-    const secret = keyStore.get(keyId)
-    
+    const secret = await getSigningKeyMaterialStore().get(keyId, keyType)
+
     if (!secret) {
       throw new Error(`Key material not found: ${keyId}`)
     }
-    
+
     return secret
   }
 
   /**
-   * Destroy key material securely
+   * Destroy key material. The store zeroes the secret and keeps a tombstone row.
    */
   private async destroyKeyMaterial(keyId: string, keyType: KeyType): Promise<void> {
-    const keyStore = this.getKeyStore(keyType)
-    keyStore.delete(keyId)
-    
-    // In production, this would also:
-    // - Zero out memory
-    // - Revoke KMS key
-    // - Log destruction to immutable audit log
-  }
-
-  /**
-   * Get in-memory key store (placeholder for KMS)
-   */
-  private getKeyStore(keyType: KeyType): Map<string, string> {
-    if (!this.keyStores.has(keyType)) {
-      this.keyStores.set(keyType, new Map())
-    }
-    return this.keyStores.get(keyType)!
+    await getSigningKeyMaterialStore().destroy(keyId, keyType)
   }
 
   /**

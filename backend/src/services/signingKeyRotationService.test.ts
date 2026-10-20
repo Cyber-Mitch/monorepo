@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { Keypair } from '@stellar/stellar-sdk'
 import { getSigningKeyRotationService, resetSigningKeyRotationService } from './signingKeyRotationService.js'
 import { setPool, type PgPoolLike } from '../db.js'
+import {
+  getSigningKeyMaterialStore,
+  InMemorySigningKeyMaterialStore,
+  initSigningKeyMaterialStore,
+} from '../models/signingKeyMaterialStore.js'
 
 describe('SigningKeyRotationService - Unit Tests', () => {
   let mockPool: PgPoolLike
@@ -18,6 +24,7 @@ describe('SigningKeyRotationService - Unit Tests', () => {
     process.env.SOROBAN_NETWORK_PASSPHRASE = 'Test Network'
 
     setPool(mockPool)
+    initSigningKeyMaterialStore(new InMemorySigningKeyMaterialStore())
     resetSigningKeyRotationService()
     rotationService = getSigningKeyRotationService()
   })
@@ -115,11 +122,43 @@ describe('SigningKeyRotationService - Unit Tests', () => {
       const secret = 'S' + 'A'.repeat(55)
 
       // Store key material directly in the in-memory store
-      ;(rotationService as any).keyStores.set('admin', new Map([[keyId, secret]]))
+      await getSigningKeyMaterialStore().put(keyId, 'admin', secret)
 
       const retrieved = await rotationService.retrieveKeyMaterial(keyId, 'admin' as any)
 
       expect(retrieved).toBe(secret)
+    })
+  })
+
+  describe('key material across restarts (#1941)', () => {
+    it('signs with a rotated key after the service restarts', async () => {
+      const signer = Keypair.random()
+      const keyId = 'key_rotated'
+
+      // Rotation stores the new key through storeKeyMaterial.
+      await (rotationService as any).storeKeyMaterial(keyId, signer.secret(), 'admin')
+
+      // Simulate a restart. The service instance is dropped, but the key material
+      // store (Postgres in production) still holds the key.
+      resetSigningKeyRotationService()
+      const restarted = getSigningKeyRotationService()
+
+      const secret = await restarted.retrieveKeyMaterial(keyId, 'admin')
+      const payload = Buffer.from('signed after restart')
+      const signature = Keypair.fromSecret(secret).sign(payload)
+
+      expect(signer.verify(payload, signature)).toBe(true)
+    })
+
+    it('stops returning a key once it has been destroyed', async () => {
+      const keyId = 'key_retired'
+      await (rotationService as any).storeKeyMaterial(keyId, Keypair.random().secret(), 'admin')
+
+      await (rotationService as any).destroyKeyMaterial(keyId, 'admin')
+
+      await expect(rotationService.retrieveKeyMaterial(keyId, 'admin')).rejects.toThrow(
+        'Key material not found',
+      )
     })
   })
 
