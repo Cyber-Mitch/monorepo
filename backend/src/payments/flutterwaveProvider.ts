@@ -170,12 +170,12 @@ export class FlutterwaveProvider implements PaymentProvider {
   async verifyPayment(input: {
     externalRefSource: string
     externalRef: string
-  }): Promise<{ status: InternalPaymentStatus; providerStatus?: string }> {
+  }): Promise<{ status: InternalPaymentStatus; providerStatus?: string; amountMinor?: number }> {
     /**
      * FLW verify by tx_ref — query the transactions list filtered by tx_ref.
      * Returns the first matching transaction.
      */
-    type TxItem = { status: string; tx_ref: string; id: number }
+    type TxItem = { status: string; tx_ref: string; id: number; amount?: number }
     type ListResponse = TxItem[]
 
     const data = await flwGet<ListResponse>(
@@ -189,8 +189,10 @@ export class FlutterwaveProvider implements PaymentProvider {
     const tx = data[0]!
     const providerStatus = tx.status
     const mapped = FLW_TX_STATUS_MAP[providerStatus.toLowerCase()] ?? 'pending'
+    // Flutterwave reports NGN in major units; convert to kobo for the comparison.
+    const amountMinor = tx.amount !== undefined ? Math.round(tx.amount * 100) : undefined
 
-    return { status: mapped, providerStatus }
+    return { status: mapped, providerStatus, amountMinor }
   }
 
   // ---- Webhook parsing & validation ---------------------------------------

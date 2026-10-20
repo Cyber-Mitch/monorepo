@@ -86,6 +86,8 @@ import {
   initNotificationPreferenceStore,
   PostgresNotificationPreferenceStore,
 } from "./models/notificationPreferenceStore.js";
+import { setMissingCreditPoster } from "./reconciliation/resolver.js";
+import { createMissingCreditPoster } from "./reconciliation/missingCreditPoster.js";
 import { OutboxWorker } from "./outbox/worker.js";
 import { DealStatusSyncWorker } from "./workers/dealStatusSyncWorker.js";
 import { RentReleaseDisputeWorker } from "./workers/rentReleaseDisputeWorker.js";
@@ -558,6 +560,12 @@ export function createApp() {
   // Notification preferences — swap to Postgres so opt-outs survive restarts (#1949)
   if (process.env.DATABASE_URL) {
     initNotificationPreferenceStore(new PostgresNotificationPreferenceStore());
+  }
+
+  // Reconciliation credits a missing payment only after the PSP confirms it (#1950).
+  // Tests register their own poster, so this is skipped there.
+  if (env.NODE_ENV !== "test") {
+    setMissingCreditPoster(createMissingCreditPoster({ ngnWalletService }));
   }
 
   // Outbox store — swap to Postgres when DATABASE_URL is set

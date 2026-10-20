@@ -67,9 +67,15 @@ export interface PaymentProvider {
 
   initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentResult>
 
+  /**
+   * Looks a payment up at the PSP by our reference. `amountMinor` is the amount the
+   * PSP recorded, in minor units (kobo), when it reports one; reconciliation uses
+   * it to check a confirmed payment against the deposit before crediting.
+   */
   verifyPayment(_input: { externalRefSource: string; externalRef: string }): Promise<{
     status: InternalPaymentStatus
     providerStatus?: string
+    amountMinor?: number
   }>
 
   parseAndValidateWebhook(req: Request): Promise<ParseWebhookResult>
