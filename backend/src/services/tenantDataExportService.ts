@@ -50,7 +50,7 @@ export interface ExportSources {
   listDeals(userId: string): Promise<unknown[]>
   listDocuments(userId: string): Promise<unknown[]>
   listNotifications(userId: string): Promise<unknown[]>
-  getPreferences(userId: string): Record<string, unknown>
+  getPreferences(userId: string): Record<string, unknown> | Promise<Record<string, unknown>>
 }
 
 async function collectAllPages<T>(
@@ -124,8 +124,8 @@ export const defaultExportSources: ExportSources = {
     return result.rows
   },
 
-  getPreferences(userId) {
-    return { ...notificationPreferenceStore.get(userId) } as Record<string, unknown>
+  async getPreferences(userId) {
+    return { ...(await notificationPreferenceStore.get(userId)) } as Record<string, unknown>
   },
 }
 
@@ -146,7 +146,7 @@ export async function collectExportDomains(
     deals,
     documents,
     notifications,
-    preferences: sources.getPreferences(userId),
+    preferences: await sources.getPreferences(userId),
   }
 }
 

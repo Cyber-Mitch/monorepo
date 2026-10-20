@@ -82,6 +82,10 @@ import { LatePaymentJob } from "./jobs/latePaymentJob.js";
 import { DataRetentionJob } from "./jobs/dataRetentionJob.js";
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js";
 import { OutboxSender } from "./outbox/sender.js";
+import {
+  initNotificationPreferenceStore,
+  PostgresNotificationPreferenceStore,
+} from "./models/notificationPreferenceStore.js";
 import { OutboxWorker } from "./outbox/worker.js";
 import { DealStatusSyncWorker } from "./workers/dealStatusSyncWorker.js";
 import { RentReleaseDisputeWorker } from "./workers/rentReleaseDisputeWorker.js";
@@ -549,6 +553,11 @@ export function createApp() {
     );
     epochSealJob.start();
     workers.push(epochSealJob);
+  }
+
+  // Notification preferences — swap to Postgres so opt-outs survive restarts (#1949)
+  if (process.env.DATABASE_URL) {
+    initNotificationPreferenceStore(new PostgresNotificationPreferenceStore());
   }
 
   // Outbox store — swap to Postgres when DATABASE_URL is set

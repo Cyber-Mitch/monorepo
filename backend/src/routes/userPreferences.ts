@@ -69,9 +69,9 @@ export function createUserPreferencesRouter(): Router {
           req.body as z.infer<typeof updateMessageEmailPreferenceSchema>
 
         if (enabled) {
-          notificationPreferenceStore.optIn(userId, 'message_received', 'email')
+          await notificationPreferenceStore.optIn(userId, 'message_received', 'email')
         } else {
-          notificationPreferenceStore.optOut(userId, 'message_received', 'email')
+          await notificationPreferenceStore.optOut(userId, 'message_received', 'email')
         }
 
         res.json({
