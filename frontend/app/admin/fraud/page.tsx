@@ -13,8 +13,8 @@ import {
   ActiveHold 
 } from '@/lib/api/fraud';
 import { releaseHoldSchema, ReleaseHoldFormValues } from '@/schemas/fraud';
-import { Button } from '@/components/ui/Button';
-import { Dialog } from '@/components/ui/Dialog';
+import { Button } from '@/components/ui/button';
+import { ModalDialog as Dialog } from '@/components/admin/ModalDialog';
 
 export default function AdminFraudReviewPage() {
   const [activeTab, setActiveTab] = useState<'assessments' | 'holds'>('assessments');

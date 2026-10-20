@@ -16,8 +16,8 @@ import {
   EventSideBySide 
 } from '@/lib/api/reconciliation';
 import { closeMismatchSchema, CloseMismatchFormValues } from '@/schemas/reconciliation';
-import { Button } from '@/components/ui/Button';
-import { Dialog } from '@/components/ui/Dialog';
+import { Button } from '@/components/ui/button';
+import { ModalDialog as Dialog } from '@/components/admin/ModalDialog';
 
 export default function AdminReconciliationPage() {
   const [aging, setAging] = useState<AgingSummary | null>(null);

@@ -3,12 +3,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { privatePageMetadata } from '@/lib/seo';
 import { 
-  getTimelockTransactions, 
-  executeTimelockTransaction, 
-  cancelTimelockTransaction,
-  TimelockTransaction 
+  getQueuedTransactions as getTimelockTransactions,
+  executeTransaction as executeTimelockTransaction,
+  cancelTransaction as cancelTimelockTransaction,
+  type QueuedTransaction as TimelockTransaction,
 } from '@/lib/timelockApi';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui/button';
 
 export default function AdminTimelockPage() {
   const [transactions, setTransactions] = useState<TimelockTransaction[]>([]);
@@ -45,8 +45,8 @@ export default function AdminTimelockPage() {
     try {
       setActionLoadingId(id);
       const result = await executeTimelockTransaction(id);
-      if (result?.txHash) {
-        setTxHashes((prev) => ({ ...prev, [id]: result.txHash }));
+      if (result?.stellarTxHash) {
+        setTxHashes((prev) => ({ ...prev, [id]: result.stellarTxHash as string }));
       }
       await loadTransactions();
     } catch (err: any) {
@@ -106,10 +106,10 @@ export default function AdminTimelockPage() {
               </tr>
             ) : (
               transactions.map((tx) => {
-                const etaTime = new Date(tx.eta).getTime();
+                const etaTime = tx.eta * 1000;
                 const now = Date.now();
                 const timeLeft = etaTime - now;
-                const isReady = timeLeft <= 0 && tx.status === 'QUEUED';
+                const isReady = timeLeft <= 0 && tx.status === 'queued';
 
                 let countdownText = '';
                 if (timeLeft > 0) {
@@ -122,7 +122,7 @@ export default function AdminTimelockPage() {
                 }
 
                 return (
-                  <tr key={tx.id} className="hover:bg-gray-50">
+                  <tr key={tx.txHash} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">{tx.target}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">{tx.functionName}</td>
                     <td className="px-6 py-4 text-sm font-mono text-gray-500 max-w-xs truncate">{JSON.stringify(tx.args)}</td>
@@ -133,25 +133,25 @@ export default function AdminTimelockPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                        tx.status === 'QUEUED' ? 'bg-blue-100 text-blue-800' :
-                        tx.status === 'EXECUTED' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        tx.status === 'queued' ? 'bg-blue-100 text-blue-800' :
+                        tx.status === 'executed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                       }`}>
-                        {tx.status}
+                        {tx.status.toUpperCase()}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                      {tx.status === 'QUEUED' && (
+                      {tx.status === 'queued' && (
                         <>
                           <Button 
-                            onClick={() => handleExecute(tx.id)} 
-                            disabled={!isReady || actionLoadingId === tx.id}
+                            onClick={() => handleExecute(tx.txHash)} 
+                            disabled={!isReady || actionLoadingId === tx.txHash}
                             size="sm"
                           >
-                            {actionLoadingId === tx.id ? 'Executing...' : 'Execute'}
+                            {actionLoadingId === tx.txHash ? 'Executing...' : 'Execute'}
                           </Button>
                           <Button 
-                            onClick={() => handleCancel(tx.id)} 
-                            disabled={actionLoadingId === tx.id}
+                            onClick={() => handleCancel(tx.txHash)} 
+                            disabled={actionLoadingId === tx.txHash}
                             variant="secondary"
                             size="sm"
                           >
@@ -159,9 +159,9 @@ export default function AdminTimelockPage() {
                           </Button>
                         </>
                       )}
-                      {txHashes[tx.id] && (
+                      {txHashes[tx.txHash] && (
                         <a 
-                          href={`https://stellar.expert/explorer/public/tx/${txHashes[tx.id]}`} 
+                          href={`https://stellar.expert/explorer/public/tx/${txHashes[tx.txHash]}`} 
                           target="_blank" 
                           rel="noreferrer"
                           className="text-indigo-600 hover:underline block text-xs mt-1"
