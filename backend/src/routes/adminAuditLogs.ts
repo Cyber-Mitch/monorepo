@@ -4,7 +4,8 @@
  * GET /api/v1/admin/audit-logs
  *
  * Filterable, paginated view of the audit_log table for compliance and
- * internal security reviews.  Non-admin requests receive 403.
+ * internal security reviews.  Requires a signed-in admin holding audit:view;
+ * everyone else receives 403.  Each read is itself written to the audit log.
  *
  * Query params:
  *   actorId      — filter by the user/actor ID that performed the action
@@ -21,8 +22,10 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { assertAdminSecret } from '../middleware/adminSecret.js'
+import { authenticateToken } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { auditLogRepository } from '../repositories/AuditLogRepository.js'
+import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
 
 const auditLogsQuerySchema = z.object({
   actorId: z.string().optional(),
@@ -38,10 +41,12 @@ const auditLogsQuerySchema = z.object({
 export function createAdminAuditLogsRouter() {
   const router = Router()
 
-  router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  router.get(
+    '/',
+    authenticateToken,
+    requirePermission('audit', 'view'),
+    async (req: Request, res: Response, next: NextFunction) => {
     try {
-      assertAdminSecret(req)
-
       const parsed = auditLogsQuerySchema.safeParse(req.query)
       if (!parsed.success) {
         throw new AppError(
@@ -52,6 +57,22 @@ export function createAdminAuditLogsRouter() {
       }
 
       const q = parsed.data
+
+      // Record who searched what, so every read of the audit log is attributable.
+      auditLog('ADMIN_AUDIT_LOG_VIEWED', extractAuditContext(req, 'admin'), {
+        source: 'admin_audit_logs_viewer',
+        filters: {
+          actorId: q.actorId,
+          action: q.action,
+          resourceType: q.resourceType,
+          resourceId: q.resourceId,
+          startDate: q.startDate,
+          endDate: q.endDate,
+        },
+        page: q.page,
+        limit: q.limit,
+      })
+
       const result = await auditLogRepository.list(
         {
           actorId: q.actorId,
@@ -87,7 +108,8 @@ export function createAdminAuditLogsRouter() {
     } catch (error) {
       next(error)
     }
-  })
+    },
+  )
 
   return router
 }
