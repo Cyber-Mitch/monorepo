@@ -9,9 +9,9 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { assertAdminSecret as requireAdmin } from '../middleware/adminSecret.js'
 import { getPool } from '../db.js'
 import { validate } from '../middleware/validate.js'
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -112,10 +112,10 @@ export function createAdminTransactionLedgerRouter() {
   /** GET /api/admin/transaction-ledger — paginated ledger */
   router.get(
     '/',
+    requireAdminAccess('reconciliation', 'view'),
     validate(ledgerQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const q = req.query as unknown as LedgerQuery
         const { rows, hasNextPage } = await queryLedger(q)
         const nextCursor = hasNextPage
@@ -131,10 +131,10 @@ export function createAdminTransactionLedgerRouter() {
   /** GET /api/admin/transaction-ledger/export — CSV export */
   router.get(
     '/export',
+    requireAdminAccess('reconciliation', 'view'),
     validate(ledgerQuerySchema.omit({ cursor: true, limit: true, sortBy: true, sortDir: true }), 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         // For CSV export, fetch all matching rows (cap at 100k to avoid OOM)
         const q: LedgerQuery = {
           ...(req.query as unknown as LedgerQuery),

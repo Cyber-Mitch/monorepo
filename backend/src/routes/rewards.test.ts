@@ -5,11 +5,13 @@ import { rewardStore } from '../models/rewardStore.js'
 import { outboxStore } from '../outbox/store.js'
 import { RewardStatus } from '../models/reward.js'
 import { OutboxStatus, TxType } from '../outbox/types.js'
+import { adminAuthHeader, seedAdminSession } from '../test-fixtures/adminAuth.js'
 
 describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
   const app = createApp()
 
   beforeEach(async () => {
+    await seedAdminSession()
     await rewardStore.clear()
     await outboxStore.clear()
   })
@@ -34,7 +36,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     })
     await rewardStore.updateStatus(reward.rewardId, RewardStatus.PAYABLE)
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send(validMarkPaidRequest)
 
@@ -69,7 +71,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     await rewardStore.updateStatus(reward2.rewardId, RewardStatus.PAYABLE)
 
     // Mark first reward as paid
-    const response1 = await request(app)
+    const response1 = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward1.rewardId}/mark-paid`)
       .send(validMarkPaidRequest)
 
@@ -77,7 +79,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     expect(response1.status).toBeLessThan(300)
 
     // Try to mark second reward with same external ref
-    const response2 = await request(app)
+    const response2 = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward2.rewardId}/mark-paid`)
       .send(validMarkPaidRequest)
 
@@ -98,7 +100,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
       amountUsdc: 100,
     })
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send(validMarkPaidRequest)
       .expect(409)
@@ -127,7 +129,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
       'pi_existing',
     )
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send(validMarkPaidRequest)
       .expect(409)
@@ -138,7 +140,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
   })
 
   it('should return 404 for non-existent reward', async () => {
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post('/api/admin/rewards/non-existent-id/mark-paid')
       .send(validMarkPaidRequest)
       .expect(404)
@@ -157,7 +159,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     })
     await rewardStore.updateStatus(reward.rewardId, RewardStatus.PAYABLE)
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send({
         ...validMarkPaidRequest,
@@ -178,7 +180,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     })
     await rewardStore.updateStatus(reward.rewardId, RewardStatus.PAYABLE)
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send({
         ...validMarkPaidRequest,
@@ -199,7 +201,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     })
     await rewardStore.updateStatus(reward.rewardId, RewardStatus.PAYABLE)
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send({
         amountUsdc: 100,
@@ -220,7 +222,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     })
     await rewardStore.updateStatus(reward.rewardId, RewardStatus.PAYABLE)
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send(validMarkPaidRequest)
 
@@ -250,7 +252,7 @@ describe('POST /api/admin/rewards/:rewardId/mark-paid', () => {
     })
     await rewardStore.updateStatus(reward.rewardId, RewardStatus.PAYABLE)
 
-    const response = await request(app)
+    const response = await request.agent(app).set(adminAuthHeader)
       .post(`/api/admin/rewards/${reward.rewardId}/mark-paid`)
       .send({
         amountUsdc: 100,

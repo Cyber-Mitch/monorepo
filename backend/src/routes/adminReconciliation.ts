@@ -1,6 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { validate } from '../middleware/validate.js'
-import { requireAdminSecret } from '../middleware/adminSecret.js'
 import { ngnDepositStore } from '../models/ngnDepositStore.js'
 import { depositStore } from '../models/depositStore.js'
 import { conversionStore } from '../models/conversionStore.js'
@@ -19,13 +18,14 @@ import {
 import { userRiskStateStore } from '../models/userRiskStateStore.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 export function createAdminReconciliationRouter(ngnWalletService: NgnWalletService) {
   const router = Router()
 
   router.get(
     '/deposits',
-    requireAdminSecret,
+    requireAdminAccess('reconciliation', 'view'),
     validate(depositsQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -95,7 +95,7 @@ export function createAdminReconciliationRouter(ngnWalletService: NgnWalletServi
 
   router.get(
     '/wallets',
-    requireAdminSecret,
+    requireAdminAccess('reconciliation', 'view'),
     validate(walletsQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -136,7 +136,7 @@ export function createAdminReconciliationRouter(ngnWalletService: NgnWalletServi
 
   router.get(
     '/conversions',
-    requireAdminSecret,
+    requireAdminAccess('reconciliation', 'view'),
     validate(conversionsQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -178,7 +178,7 @@ export function createAdminReconciliationRouter(ngnWalletService: NgnWalletServi
 
   router.get(
     '/outbox',
-    requireAdminSecret,
+    requireAdminAccess('reconciliation', 'view'),
     validate(outboxQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {

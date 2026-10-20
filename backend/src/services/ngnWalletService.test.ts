@@ -8,12 +8,14 @@ import { outboxStore } from '../outbox/index.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { seedNgnWalletFixture } from '../test-fixtures/ngnWalletFixtures.js'
+import { ngnWithdrawalStore } from '../models/ngnWithdrawalStore.js'
 
 describe('NgnWalletService - General-purpose balance, ledger, and withdrawal logic', () => {
   let service: NgnWalletService
   const userId = 'user-general-1'
 
   beforeEach(async () => {
+    await ngnWithdrawalStore.clear()
     service = new NgnWalletService()
     await ngnWalletStore.clear()
     userRiskStateStore.clear()

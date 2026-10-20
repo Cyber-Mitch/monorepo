@@ -17,15 +17,17 @@ import { ngnWalletStore } from '../models/ngnWalletStore.js'
 import { LedgerEntryType } from '../models/ngnWallet.js'
 import { outboxStore } from '../outbox/store.js'
 import { TxType } from '../outbox/types.js'
+import { randomUUID } from 'node:crypto'
+import {
+  ngnWithdrawalStore,
+  type NgnWithdrawalRecord,
+  type NgnWithdrawalStatus,
+} from '../models/ngnWithdrawalStore.js'
 
 export class NgnWalletService {
-  // We keep these for some temporary tracking, but the LEDGER is the source of truth for balance
-  private withdrawals: WithdrawalResponse[] = []
-  private withdrawalUserIds: Map<string, string> = new Map()
+  // The LEDGER is the source of truth for balance; withdrawals are persisted in ngnWithdrawalStore.
   private bankAccountsByRef: Map<string, { accountNumber: string; accountName: string; bankName: string }> = new Map()
   private creditedDeposits = new Set<string>()
-  // When each withdrawal was claimed for payout, used to find stuck payouts
-  private payoutStartedAt: Map<string, number> = new Map()
 
   constructor() {
     this.initializeDemoData()
@@ -397,21 +399,31 @@ export class NgnWalletService {
     }
   }
 
+  private toWithdrawalResponse(record: NgnWithdrawalRecord): WithdrawalResponse {
+    return {
+      id: record.id,
+      amountNgn: record.amountNgn,
+      status: record.status,
+      bankAccount: record.bankAccount,
+      reference: record.reference,
+      createdAt: record.createdAt.toISOString(),
+      processedAt: record.processedAt ? record.processedAt.toISOString() : null,
+      failureReason: record.failureReason,
+    }
+  }
+
+  private async requireWithdrawal(withdrawalId: string): Promise<NgnWithdrawalRecord> {
+    const record = await ngnWithdrawalStore.getById(withdrawalId)
+    if (!record) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
+    return record
+  }
+
   async initiateWithdrawal(userId: string, request: WithdrawalRequest): Promise<WithdrawalResponse> {
     await this.requireNotFrozen(userId)
 
-    const withdrawalId = `wd-${Date.now()}`
-    const reference = `WD-${Date.now()}`
-    const withdrawal: WithdrawalResponse = {
-      id: withdrawalId,
-      amountNgn: request.amountNgn,
-      status: 'pending',
-      bankAccount: this.resolveBankAccount(request),
-      reference,
-      createdAt: new Date().toISOString(),
-      processedAt: null,
-      failureReason: null
-    }
+    const bankAccount = this.resolveBankAccount(request)
+    const withdrawalId = `wd-${randomUUID()}`
+    const reference = `WD-${randomUUID().slice(0, 12).toUpperCase()}`
 
     const wallet = await this.getOrCreateWallet(userId)
     const release = await ngnWalletStore.acquireLock(wallet.walletId)
@@ -421,68 +433,97 @@ export class NgnWalletService {
         throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Insufficient balance. Available: ${balance.availableNgn}, Requested: ${request.amountNgn}`)
       }
 
-      await ngnWalletStore.createLedgerEntry({
-        walletId: wallet.walletId,
-        type: 'WITHDRAWAL_PENDING',
-        amountNgn: -request.amountNgn,
-        referenceType: 'withdrawal',
-        referenceId: withdrawalId
-      })
-      this.withdrawals.unshift(withdrawal)
-      this.withdrawalUserIds.set(withdrawalId, userId)
-      return withdrawal
+      // The withdrawal and the ledger entry that reserves its funds are written together.
+      const record = await ngnWithdrawalStore.createWithReservation(
+        { id: withdrawalId, userId, walletId: wallet.walletId, amountNgn: request.amountNgn, bankAccount, reference },
+        {
+          walletId: wallet.walletId,
+          type: 'WITHDRAWAL_PENDING',
+          amountNgn: -request.amountNgn,
+          referenceType: 'withdrawal',
+          referenceId: withdrawalId,
+        },
+      )
+      return this.toWithdrawalResponse(record)
     } finally {
       await release()
     }
+  }
+
+  /**
+   * Moves a withdrawal and writes its ledger entry in one step. Repeating a change that has already
+   * been made is a no-op that returns the current state; a change the status does not allow is a 409.
+   */
+  private async changeWithdrawal(
+    withdrawalId: string,
+    change: {
+      from: readonly NgnWithdrawalStatus[]
+      to: NgnWithdrawalStatus
+      patch?: Parameters<typeof ngnWithdrawalStore.transition>[1]['patch']
+      ledger?: { type: 'WITHDRAWAL_CONFIRMED' | 'WITHDRAWAL_FAILED'; sign: 1 | -1 }
+    },
+  ): Promise<{ record: NgnWithdrawalRecord; changed: boolean }> {
+    const current = await this.requireWithdrawal(withdrawalId)
+    if (current.status === change.to) return { record: current, changed: false }
+
+    const result = await ngnWithdrawalStore.transition(withdrawalId, {
+      from: change.from,
+      to: change.to,
+      patch: change.patch,
+      ledger: change.ledger && {
+        walletId: current.walletId,
+        type: change.ledger.type,
+        amountNgn: change.ledger.sign * current.amountNgn,
+        referenceType: 'withdrawal',
+        referenceId: withdrawalId,
+      },
+    })
+    if (!result) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
+    return result
+  }
+
+  private async changeOrConflict(
+    withdrawalId: string,
+    change: Parameters<NgnWalletService['changeWithdrawal']>[1],
+    action: string,
+  ): Promise<NgnWithdrawalRecord> {
+    const { record, changed } = await this.changeWithdrawal(withdrawalId, change)
+    if (!changed && record.status !== change.to) {
+      throw new AppError(
+        ErrorCode.CONFLICT,
+        409,
+        `Cannot ${action} a withdrawal that is ${record.status}`,
+      )
+    }
+    return record
   }
 
   async confirmWithdrawal(withdrawalId: string): Promise<WithdrawalResponse> {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
-    if (withdrawal.status === 'confirmed') return withdrawal
-
-    const userId = this.withdrawalUserIds.get(withdrawalId)!
-    const wallet = await this.getOrCreateWallet(userId)
-    const release = await ngnWalletStore.acquireLock(wallet.walletId)
-    try {
-      await ngnWalletStore.createLedgerEntry({
-        walletId: wallet.walletId,
-        type: 'WITHDRAWAL_CONFIRMED',
-        amountNgn: -withdrawal.amountNgn,
-        referenceType: 'withdrawal',
-        referenceId: withdrawalId
-      })
-      withdrawal.status = 'confirmed'
-      withdrawal.processedAt = new Date().toISOString()
-      return withdrawal
-    } finally {
-      await release()
-    }
+    const record = await this.changeOrConflict(
+      withdrawalId,
+      {
+        from: ['pending', 'approved', 'processing'],
+        to: 'confirmed',
+        patch: { processedAt: new Date() },
+        ledger: { type: 'WITHDRAWAL_CONFIRMED', sign: -1 },
+      },
+      'confirm',
+    )
+    return this.toWithdrawalResponse(record)
   }
 
   async failWithdrawal(withdrawalId: string, reason: string): Promise<WithdrawalResponse> {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
-    if (withdrawal.status === 'failed') return withdrawal
-
-    const userId = this.withdrawalUserIds.get(withdrawalId)!
-    const wallet = await this.getOrCreateWallet(userId)
-    const release = await ngnWalletStore.acquireLock(wallet.walletId)
-    try {
-      await ngnWalletStore.createLedgerEntry({
-        walletId: wallet.walletId,
-        type: 'WITHDRAWAL_FAILED',
-        amountNgn: withdrawal.amountNgn,
-        referenceType: 'withdrawal',
-        referenceId: withdrawalId
-      })
-      withdrawal.status = 'failed'
-      withdrawal.processedAt = new Date().toISOString()
-      withdrawal.failureReason = reason
-      return withdrawal
-    } finally {
-      await release()
-    }
+    const record = await this.changeOrConflict(
+      withdrawalId,
+      {
+        from: ['pending', 'approved', 'processing'],
+        to: 'failed',
+        patch: { processedAt: new Date(), failureReason: reason },
+        ledger: { type: 'WITHDRAWAL_FAILED', sign: 1 },
+      },
+      'fail',
+    )
+    return this.toWithdrawalResponse(record)
   }
 
   async listWithdrawals(userId: string, options: { limit?: number; cursor?: string } = {}): Promise<WithdrawalHistoryResponse> {
@@ -492,11 +533,25 @@ export class NgnWalletService {
 
   async getWithdrawalHistory(userId: string, options: { limit?: number; cursor?: string } = {}): Promise<WithdrawalHistoryResponse> {
     await this.getOrCreateWallet(userId)
-    const userWithdrawals = this.withdrawals.filter(w => this.withdrawalUserIds.get(w.id) === userId)
-    const limit = options.limit || 20
+    const { items, nextCursor } = await ngnWithdrawalStore.list({
+      userId,
+      limit: options.limit,
+      cursor: options.cursor,
+    })
+    return { entries: items.map((r) => this.toWithdrawalResponse(r)), nextCursor }
+  }
+
+  /** Every user's withdrawals, newest first, for the admin approval queue. */
+  async listAllWithdrawals(options: { status?: NgnWithdrawalStatus; limit?: number; cursor?: string } = {}) {
+    const { items, nextCursor } = await ngnWithdrawalStore.list(options)
     return {
-      entries: userWithdrawals.slice(0, limit),
-      nextCursor: null
+      items: items.map((r) => ({
+        ...this.toWithdrawalResponse(r),
+        userId: r.userId,
+        approvedBy: r.approvedBy,
+        approvedAt: r.approvedAt ? r.approvedAt.toISOString() : null,
+      })),
+      nextCursor,
     }
   }
 
@@ -525,142 +580,104 @@ export class NgnWalletService {
   }
 
   /**
-   * Approval only queues the payout. No money has moved yet, so the withdrawal
-   * is not confirmed here. The payout worker sends the transfer and then
-   * confirms or fails it (see claimForPayout / completePayout / failPayout).
+   * Approval only queues the payout: pending -> approved. No money has moved, so nothing is
+   * confirmed here; the payout worker moves it on (claimForPayout / completePayout / failPayout).
+   * Approving an approved withdrawal is a no-op, and one already past that point is left as it is.
    */
-  async approveWithdrawal(withdrawalId: string): Promise<WithdrawalResponse> {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
-    if (withdrawal.status === 'pending') {
-      withdrawal.status = 'approved'
+  async approveWithdrawal(withdrawalId: string, approvedBy?: string): Promise<WithdrawalResponse> {
+    const current = await this.requireWithdrawal(withdrawalId)
+    if (current.status === 'pending') {
+      const { record } = await this.changeWithdrawal(withdrawalId, {
+        from: ['pending'],
+        to: 'approved',
+        patch: { approvedBy: approvedBy ?? null, approvedAt: new Date() },
+      })
+      return this.toWithdrawalResponse(record)
     }
-    return withdrawal
+    if (current.status === 'rejected' || current.status === 'failed') {
+      throw new AppError(ErrorCode.CONFLICT, 409, `Cannot approve a withdrawal that is ${current.status}`)
+    }
+    return this.toWithdrawalResponse(current)
   }
 
-  getWithdrawal(withdrawalId: string): WithdrawalResponse | undefined {
-    return this.withdrawals.find(w => w.id === withdrawalId)
+  async getWithdrawal(withdrawalId: string): Promise<WithdrawalResponse | undefined> {
+    const record = await ngnWithdrawalStore.getById(withdrawalId)
+    return record ? this.toWithdrawalResponse(record) : undefined
   }
 
-  getWithdrawalUserId(withdrawalId: string): string | undefined {
-    return this.withdrawalUserIds.get(withdrawalId)
+  async getWithdrawalUserId(withdrawalId: string): Promise<string | undefined> {
+    return (await ngnWithdrawalStore.getById(withdrawalId))?.userId
   }
 
-  listWithdrawalsByStatus(status: WithdrawalResponse['status']): WithdrawalResponse[] {
-    return this.withdrawals.filter(w => w.status === status)
+  async listWithdrawalsByStatus(status: WithdrawalResponse['status'], limit = 100): Promise<WithdrawalResponse[]> {
+    if (!(status in { pending: 1, approved: 1, processing: 1, confirmed: 1, failed: 1, rejected: 1 })) return []
+    const { items } = await ngnWithdrawalStore.list({ status: status as NgnWithdrawalStatus, limit })
+    // Oldest first, so the longest-waiting payout is handled first.
+    return items.reverse().map((r) => this.toWithdrawalResponse(r))
   }
 
-  getPayoutStartedAt(withdrawalId: string): number | undefined {
-    return this.payoutStartedAt.get(withdrawalId)
+  async getPayoutStartedAt(withdrawalId: string): Promise<number | undefined> {
+    return (await ngnWithdrawalStore.getById(withdrawalId))?.payoutStartedAt?.getTime()
   }
 
   /**
-   * Moves an approved withdrawal to 'processing' so one caller owns the payout.
-   * Returns null if it is not approved (already claimed, or not approved at all).
-   * The check and the write have no await between them, so they are atomic in-process.
+   * Moves an approved withdrawal to 'processing' so one caller owns the payout. Returns null if it is
+   * not approved (already claimed, or not approved at all). The status guard is applied in the store,
+   * so two callers on different instances cannot both win.
    */
-  claimForPayout(withdrawalId: string): WithdrawalResponse | null {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal || withdrawal.status !== 'approved') return null
-    withdrawal.status = 'processing'
-    this.payoutStartedAt.set(withdrawalId, Date.now())
-    return withdrawal
+  async claimForPayout(withdrawalId: string): Promise<WithdrawalResponse | null> {
+    const result = await ngnWithdrawalStore.transition(withdrawalId, {
+      from: ['approved'],
+      to: 'processing',
+      patch: { payoutStartedAt: new Date() },
+    })
+    return result?.changed ? this.toWithdrawalResponse(result.record) : null
   }
 
   /**
-   * Records a successful PSP transfer: writes WITHDRAWAL_CONFIRMED and sets
-   * 'confirmed'. A withdrawal that is not 'processing' is returned unchanged,
-   * so a duplicate PSP webhook cannot confirm it twice.
+   * Records a successful PSP transfer: writes WITHDRAWAL_CONFIRMED and sets 'confirmed'. A withdrawal
+   * that is not 'processing' is returned unchanged, so a duplicate PSP webhook cannot confirm it twice.
    */
   async completePayout(withdrawalId: string): Promise<WithdrawalResponse> {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
-    if (withdrawal.status !== 'processing') return withdrawal
-
-    // Claim the transition synchronously so a concurrent caller returns above
-    withdrawal.status = 'confirmed'
-    const userId = this.withdrawalUserIds.get(withdrawalId)!
-    try {
-      const wallet = await this.getOrCreateWallet(userId)
-      const release = await ngnWalletStore.acquireLock(wallet.walletId)
-      try {
-        await ngnWalletStore.createLedgerEntry({
-          walletId: wallet.walletId,
-          type: 'WITHDRAWAL_CONFIRMED',
-          amountNgn: -withdrawal.amountNgn,
-          referenceType: 'withdrawal',
-          referenceId: withdrawalId
-        })
-      } finally {
-        await release()
-      }
-    } catch (error) {
-      withdrawal.status = 'processing'
-      throw error
-    }
-    this.payoutStartedAt.delete(withdrawalId)
-    withdrawal.processedAt = new Date().toISOString()
-    return withdrawal
+    const current = await this.requireWithdrawal(withdrawalId)
+    if (current.status !== 'processing') return this.toWithdrawalResponse(current)
+    const { record } = await this.changeWithdrawal(withdrawalId, {
+      from: ['processing'],
+      to: 'confirmed',
+      patch: { processedAt: new Date() },
+      ledger: { type: 'WITHDRAWAL_CONFIRMED', sign: -1 },
+    })
+    return this.toWithdrawalResponse(record)
   }
 
   /**
-   * Records a failed PSP transfer: writes WITHDRAWAL_FAILED, which releases the
-   * held funds back to available, and sets 'failed'. Ignored unless 'processing'.
+   * Records a failed PSP transfer: writes WITHDRAWAL_FAILED, which releases the held funds back to
+   * available, and sets 'failed'. Ignored unless 'processing'.
    */
   async failPayout(withdrawalId: string, reason: string): Promise<WithdrawalResponse> {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
-    if (withdrawal.status !== 'processing') return withdrawal
-
-    withdrawal.status = 'failed'
-    withdrawal.failureReason = reason
-    const userId = this.withdrawalUserIds.get(withdrawalId)!
-    try {
-      const wallet = await this.getOrCreateWallet(userId)
-      const release = await ngnWalletStore.acquireLock(wallet.walletId)
-      try {
-        await ngnWalletStore.createLedgerEntry({
-          walletId: wallet.walletId,
-          type: 'WITHDRAWAL_FAILED',
-          amountNgn: withdrawal.amountNgn,
-          referenceType: 'withdrawal',
-          referenceId: withdrawalId
-        })
-      } finally {
-        await release()
-      }
-    } catch (error) {
-      withdrawal.status = 'processing'
-      withdrawal.failureReason = null
-      throw error
-    }
-    this.payoutStartedAt.delete(withdrawalId)
-    withdrawal.processedAt = new Date().toISOString()
-    return withdrawal
+    const current = await this.requireWithdrawal(withdrawalId)
+    if (current.status !== 'processing') return this.toWithdrawalResponse(current)
+    const { record } = await this.changeWithdrawal(withdrawalId, {
+      from: ['processing'],
+      to: 'failed',
+      patch: { processedAt: new Date(), failureReason: reason },
+      ledger: { type: 'WITHDRAWAL_FAILED', sign: 1 },
+    })
+    return this.toWithdrawalResponse(record)
   }
 
+  /** Rejects a pending or approved withdrawal and releases its reserved funds. Rejecting twice is a no-op. */
   async rejectWithdrawal(withdrawalId: string, reason: string): Promise<WithdrawalResponse> {
-    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
-    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
-    if (withdrawal.status === 'rejected') return withdrawal
-
-    const userId = this.withdrawalUserIds.get(withdrawalId)!
-    const wallet = await this.getOrCreateWallet(userId)
-    const release = await ngnWalletStore.acquireLock(wallet.walletId)
-    try {
-      await ngnWalletStore.createLedgerEntry({
-        walletId: wallet.walletId,
-        type: 'WITHDRAWAL_FAILED',
-        amountNgn: withdrawal.amountNgn,
-        referenceType: 'withdrawal',
-        referenceId: withdrawalId
-      })
-      withdrawal.status = 'rejected'
-      withdrawal.processedAt = new Date().toISOString()
-      withdrawal.failureReason = reason
-      return withdrawal
-    } finally {
-      await release()
-    }
+    const record = await this.changeOrConflict(
+      withdrawalId,
+      {
+        from: ['pending', 'approved'],
+        to: 'rejected',
+        patch: { processedAt: new Date(), failureReason: reason },
+        ledger: { type: 'WITHDRAWAL_FAILED', sign: 1 },
+      },
+      'reject',
+    )
+    return this.toWithdrawalResponse(record)
   }
 }

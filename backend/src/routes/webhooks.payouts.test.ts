@@ -9,6 +9,7 @@ import { webhookEventDedupeStore } from '../models/webhookEventDedupeStore.js'
 import { errorHandler } from '../middleware/errorHandler.js'
 import { seedNgnWalletFixture } from '../test-fixtures/ngnWalletFixtures.js'
 import { payoutReferenceFor } from '../jobs/withdrawalPayoutWorker.js'
+import { ngnWithdrawalStore } from '../models/ngnWithdrawalStore.js'
 
 describe('Webhooks - withdrawal payout results', () => {
   let app: Express
@@ -17,6 +18,7 @@ describe('Webhooks - withdrawal payout results', () => {
   const bankAccount = { accountNumber: '1234567890', accountName: 'Test User', bankName: 'Test Bank' }
 
   beforeEach(async () => {
+    await ngnWithdrawalStore.clear()
     service = new NgnWalletService()
     await ngnWalletStore.clear()
     userRiskStateStore.clear()
@@ -38,7 +40,7 @@ describe('Webhooks - withdrawal payout results', () => {
   async function processingWithdrawal() {
     const withdrawal = await service.initiateWithdrawal(userId, { amountNgn: 2000, bankAccount })
     await service.approveWithdrawal(withdrawal.id)
-    service.claimForPayout(withdrawal.id)
+    await service.claimForPayout(withdrawal.id)
     return withdrawal
   }
 
@@ -56,7 +58,7 @@ describe('Webhooks - withdrawal payout results', () => {
       .expect(200)
 
     expect(res.body.success).toBe(true)
-    expect(service.getWithdrawal(withdrawal.id)?.status).toBe('confirmed')
+    expect((await service.getWithdrawal(withdrawal.id))?.status).toBe('confirmed')
   })
 
   it('a duplicate delivery is deduplicated and does not confirm twice', async () => {
@@ -89,7 +91,7 @@ describe('Webhooks - withdrawal payout results', () => {
       })
       .expect(200)
 
-    expect(service.getWithdrawal(withdrawal.id)?.status).toBe('failed')
+    expect((await service.getWithdrawal(withdrawal.id))?.status).toBe('failed')
     expect((await service.getBalance(userId)).availableNgn).toBe(50000)
   })
 

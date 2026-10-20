@@ -10,8 +10,8 @@ import { logger } from "../utils/logger.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { validate } from "../middleware/validate.js";
-import { requireAdminSecret } from "../middleware/adminSecret.js";
 import { describeGateResult, executeOrPropose } from "../services/multisigGate.js";
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 const proposeAssignRoleSchema = z.object({
   subject: z.string(),
@@ -45,7 +45,7 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/propose-assign-role",
-    requireAdminSecret,
+    requireAdminAccess('contract_access', 'execute', { freshAuth: true }),
     validate(proposeAssignRoleSchema, "body"),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -94,7 +94,7 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/confirm-assign-role",
-    requireAdminSecret,
+    requireAdminAccess('contract_access', 'execute', { freshAuth: true }),
     validate(confirmAssignRoleSchema, "body"),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -127,7 +127,7 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/delegate-permission",
-    requireAdminSecret,
+    requireAdminAccess('contract_access', 'execute'),
     validate(delegatePermissionSchema, "body"),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -160,7 +160,7 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
    */
   router.get(
     "/role",
-    requireAdminSecret,
+    requireAdminAccess('contract_access', 'view'),
     validate(getRoleSchema, "query"),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -193,7 +193,7 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
    */
   router.get(
     "/permission",
-    requireAdminSecret,
+    requireAdminAccess('contract_access', 'view'),
     validate(hasPermissionSchema, "query"),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -227,7 +227,7 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
    */
   router.get(
     "/roles",
-    requireAdminSecret,
+    requireAdminAccess('contract_access', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         if (!adapter.listRoles) {

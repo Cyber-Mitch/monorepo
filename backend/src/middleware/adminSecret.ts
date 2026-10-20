@@ -16,6 +16,11 @@ function isAdminSecretValid(req: Request): boolean {
   return Boolean(env.MANUAL_ADMIN_SECRET) && headerSecret === env.MANUAL_ADMIN_SECRET
 }
 
+/** True when the request carries the configured `x-admin-secret` (always false when none is configured). */
+export function hasValidAdminSecret(req: Request): boolean {
+  return isAdminSecretValid(req)
+}
+
 /**
  * Throws if the request doesn't carry a valid `x-admin-secret` header.
  * Use this form inside handlers that already run in a try/catch and call

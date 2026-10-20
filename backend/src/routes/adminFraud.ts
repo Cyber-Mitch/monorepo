@@ -3,12 +3,12 @@ import { z } from 'zod'
 import { validate } from '../middleware/validate.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { assertAdminSecret as requireAdmin } from '../middleware/adminSecret.js'
 import { getFraudStore } from '../fraud/store.js'
 import { getFraudEngine } from '../fraud/engine.js'
 import { SignalType, RiskLevel, ActionType, EntityType } from '../fraud/types.js'
 import { outboxStore } from '../outbox/store.js'
 import { TxType } from '../outbox/types.js'
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 const createSignalSchema = z.object({
   name: z.string().min(1).max(255),
@@ -102,9 +102,8 @@ export function createAdminFraudRouter() {
    * GET /api/admin/fraud/signals
    * List all fraud signals
    */
-  router.get('/signals', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/signals', requireAdminAccess('fraud', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const enabled = req.query.enabled === 'true' ? true : req.query.enabled === 'false' ? false : undefined
       const signals = await getFraudStore().listSignals({ enabled })
       res.json({ signals })
@@ -117,9 +116,8 @@ export function createAdminFraudRouter() {
    * GET /api/admin/fraud/signals/:id
    * Get a single fraud signal
    */
-  router.get('/signals/:id', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/signals/:id', requireAdminAccess('fraud', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const signal = await getFraudStore().getSignal(req.params.id)
       if (!signal) throw new AppError(ErrorCode.NOT_FOUND, 404, `Signal ${req.params.id} not found`)
       res.json({ signal })
@@ -134,10 +132,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/signals',
+    requireAdminAccess('fraud', 'manage'),
     validate(createSignalSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof createSignalSchema>
         const signal = await getFraudStore().createSignal(body)
         res.status(201).json({ signal })
@@ -153,10 +151,10 @@ export function createAdminFraudRouter() {
    */
   router.put(
     '/signals/:id',
+    requireAdminAccess('fraud', 'manage'),
     validate(updateSignalSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof updateSignalSchema>
         const signal = await getFraudStore().updateSignal(req.params.id, body)
         res.json({ signal })
@@ -170,9 +168,8 @@ export function createAdminFraudRouter() {
    * DELETE /api/admin/fraud/signals/:id
    * Delete a fraud signal
    */
-  router.delete('/signals/:id', async (req: Request, res: Response, next: NextFunction) => {
+  router.delete('/signals/:id', requireAdminAccess('fraud', 'manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       await getFraudStore().deleteSignal(req.params.id)
       res.json({ success: true })
     } catch (err) {
@@ -184,9 +181,8 @@ export function createAdminFraudRouter() {
    * POST /api/admin/fraud/signals/:id/enable
    * Enable a fraud signal
    */
-  router.post('/signals/:id/enable', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/signals/:id/enable', requireAdminAccess('fraud', 'manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       await getFraudStore().enableSignal(req.params.id)
       res.json({ success: true })
     } catch (err) {
@@ -198,9 +194,8 @@ export function createAdminFraudRouter() {
    * POST /api/admin/fraud/signals/:id/disable
    * Disable a fraud signal
    */
-  router.post('/signals/:id/disable', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/signals/:id/disable', requireAdminAccess('fraud', 'manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       await getFraudStore().disableSignal(req.params.id)
       res.json({ success: true })
     } catch (err) {
@@ -218,10 +213,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/evaluate',
+    requireAdminAccess('fraud', 'manage'),
     validate(evaluateEventSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof evaluateEventSchema>
         const engine = getFraudEngine()
         const assessment = await engine.evaluate(body)
@@ -238,10 +233,10 @@ export function createAdminFraudRouter() {
    */
   router.get(
     '/assessments',
+    requireAdminAccess('fraud', 'view'),
     validate(listAssessmentsQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const { riskLevel, limit, offset } = req.query as unknown as z.infer<typeof listAssessmentsQuerySchema>
         const assessments = await getFraudStore().listAssessments({ riskLevel, limit, offset })
         res.json({ assessments })
@@ -255,9 +250,8 @@ export function createAdminFraudRouter() {
    * GET /api/admin/fraud/assessments/:id
    * Get a single assessment
    */
-  router.get('/assessments/:id', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/assessments/:id', requireAdminAccess('fraud', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const assessment = await getFraudStore().getAssessment(req.params.id)
       if (!assessment) throw new AppError(ErrorCode.NOT_FOUND, 404, `Assessment ${req.params.id} not found`)
       res.json({ assessment })
@@ -272,9 +266,9 @@ export function createAdminFraudRouter() {
    */
   router.get(
     '/assessments/entity/:type/:id',
+    requireAdminAccess('fraud', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const entityType = req.params.type as EntityType
         const entityId = req.params.id
         const limit = parseInt(req.query.limit as string) || 50
@@ -294,9 +288,8 @@ export function createAdminFraudRouter() {
    * GET /api/admin/fraud/holds/:accountId
    * Get active holds for an account
    */
-  router.get('/holds/:accountId', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/holds/:accountId', requireAdminAccess('fraud', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const holds = await getFraudStore().getActiveHolds(req.params.accountId)
       res.json({ holds })
     } catch (err) {
@@ -310,10 +303,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/holds/:holdId/release',
+    requireAdminAccess('fraud', 'manage'),
     validate(releaseHoldSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const { releasedBy } = req.body as z.infer<typeof releaseHoldSchema>
         await getFraudStore().releaseHold(req.params.holdId, releasedBy)
         res.json({ success: true })
@@ -331,9 +324,8 @@ export function createAdminFraudRouter() {
    * GET /api/admin/fraud/thresholds
    * Get current risk thresholds
    */
-  router.get('/thresholds', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/thresholds', requireAdminAccess('fraud', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const engine = getFraudEngine()
       const thresholds = engine.getThresholds()
       res.json({ thresholds })
@@ -348,10 +340,10 @@ export function createAdminFraudRouter() {
    */
   router.put(
     '/thresholds',
+    requireAdminAccess('fraud', 'manage'),
     validate(updateThresholdsSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof updateThresholdsSchema>
         const engine = getFraudEngine()
         engine.updateThresholds(body)
@@ -373,10 +365,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/slashing/submit-evidence',
+    requireAdminAccess('fraud', 'manage'),
     validate(submitEvidenceSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof submitEvidenceSchema>
         const item = await outboxStore.create({
           txType: TxType.SLASHING_SUBMIT_EVIDENCE,
@@ -397,10 +389,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/slashing/reveal-evidence',
+    requireAdminAccess('fraud', 'manage'),
     validate(revealEvidenceSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof revealEvidenceSchema>
         const item = await outboxStore.create({
           txType: TxType.SLASHING_REVEAL_EVIDENCE,
@@ -421,10 +413,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/slashing/propose-slash',
+    requireAdminAccess('fraud', 'manage'),
     validate(proposeSlashSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof proposeSlashSchema>
         const item = await outboxStore.create({
           txType: TxType.SLASHING_PROPOSE_SLASH,
@@ -445,10 +437,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/slashing/finalize-slash',
+    requireAdminAccess('fraud', 'manage'),
     validate(finalizeSlashSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof finalizeSlashSchema>
         const item = await outboxStore.create({
           txType: TxType.SLASHING_FINALIZE_SLASH,
@@ -469,10 +461,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/slashing/cancel-slash',
+    requireAdminAccess('fraud', 'manage'),
     validate(cancelSlashSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof cancelSlashSchema>
         const item = await outboxStore.create({
           txType: TxType.SLASHING_CANCEL_SLASH,
@@ -497,10 +489,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/bond/deposit',
+    requireAdminAccess('fraud', 'manage'),
     validate(depositBondSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof depositBondSchema>
         const item = await outboxStore.create({
           txType: TxType.BOND_DEPOSIT,
@@ -521,10 +513,10 @@ export function createAdminFraudRouter() {
    */
   router.post(
     '/bond/withdraw',
+    requireAdminAccess('fraud', 'manage'),
     validate(withdrawBondSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof withdrawBondSchema>
         const item = await outboxStore.create({
           txType: TxType.BOND_WITHDRAW,

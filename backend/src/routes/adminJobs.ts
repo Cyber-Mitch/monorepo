@@ -3,11 +3,11 @@ import { z } from 'zod'
 import { validate } from '../middleware/validate.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { assertAdminSecret as requireAdmin } from '../middleware/adminSecret.js'
 import { getJobStore } from '../jobs/scheduler/store.js'
 import { getScheduler } from '../jobs/scheduler/worker.js'
 import { JobStatus } from '../jobs/scheduler/types.js'
 import { getJobHealthReport } from '../jobs/jobObservability.js'
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 const listJobsQuerySchema = z.object({
   status: z.nativeEnum(JobStatus).optional(),
@@ -38,10 +38,10 @@ export function createAdminJobsRouter() {
    */
   router.get(
     '/',
+    requireAdminAccess('jobs', 'view'),
     validate(listJobsQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const { status, limit, offset } = req.query as unknown as z.infer<typeof listJobsQuerySchema>
         const jobs = await getJobStore().listAll({ status, limit, offset })
         res.json({ jobs })
@@ -58,9 +58,8 @@ export function createAdminJobsRouter() {
    *
    * Registered before `/:id` so the literal path wins over the parameter.
    */
-  router.get('/health', (req: Request, res: Response, next: NextFunction) => {
+  router.get('/health', requireAdminAccess('jobs', 'view'), (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       res.json(getJobHealthReport())
     } catch (err) {
       next(err)
@@ -71,9 +70,8 @@ export function createAdminJobsRouter() {
    * GET /api/admin/jobs/:id
    * Get a single job by ID.
    */
-  router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/:id', requireAdminAccess('jobs', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const job = await getJobStore().findById(req.params.id)
       if (!job) throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${req.params.id} not found`)
       res.json({ job })
@@ -88,10 +86,10 @@ export function createAdminJobsRouter() {
    */
   router.post(
     '/',
+    requireAdminAccess('jobs', 'manage'),
     validate(scheduleJobBodySchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const body = req.body as z.infer<typeof scheduleJobBodySchema>
         const job = await getScheduler().schedule(body)
         res.status(201).json({ job })
@@ -107,10 +105,10 @@ export function createAdminJobsRouter() {
    */
   router.post(
     '/:id/reschedule',
+    requireAdminAccess('jobs', 'manage'),
     validate(rescheduleBodySchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const { nextRunAt } = req.body as z.infer<typeof rescheduleBodySchema>
         const store = getJobStore()
         const job = await store.findById(req.params.id)
@@ -128,9 +126,8 @@ export function createAdminJobsRouter() {
    * POST /api/admin/jobs/:id/cancel
    * Cancel a pending or failed job so it will not run again.
    */
-  router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/:id/cancel', requireAdminAccess('jobs', 'manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const store = getJobStore()
       const job = await store.findById(req.params.id)
       if (!job) throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${req.params.id} not found`)
@@ -145,9 +142,8 @@ export function createAdminJobsRouter() {
    * GET /api/admin/jobs/:id/history
    * Get job run history for a specific job.
    */
-  router.get('/:id/history', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/:id/history', requireAdminAccess('jobs', 'view'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const store = getJobStore()
       const job = await store.findById(req.params.id)
       if (!job) throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${req.params.id} not found`)
@@ -163,9 +159,8 @@ export function createAdminJobsRouter() {
    * POST /api/admin/jobs/:id/trigger
    * Manually trigger a job to run immediately (respects lease semantics).
    */
-  router.post('/:id/trigger', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/:id/trigger', requireAdminAccess('jobs', 'manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const store = getJobStore()
       const job = await store.findById(req.params.id)
       if (!job) throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${req.params.id} not found`)

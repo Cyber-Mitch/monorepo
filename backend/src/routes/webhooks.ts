@@ -393,7 +393,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
         }
 
         const withdrawalId = withdrawalIdFromPayoutReference(parsed.externalRef);
-        if (!withdrawalId || !ngnWalletService.getWithdrawal(withdrawalId)) {
+        if (!withdrawalId || !(await ngnWalletService.getWithdrawal(withdrawalId))) {
           throw new AppError(ErrorCode.NOT_FOUND, 404, "Withdrawal not found");
         }
 

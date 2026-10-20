@@ -236,5 +236,27 @@ export class PostgresNgnWalletStore implements NgnWalletStore {
     }
 }
 
-// Export singleton instance for app use, default to InMemory for MVP
-export const ngnWalletStore: NgnWalletStore = new InMemoryNgnWalletStore()
+/**
+ * The store the app uses. It forwards to one implementation, in memory by default, and
+ * `initNgnWalletStore` swaps in Postgres at startup, as the other `init*Store()` functions do.
+ */
+class SwitchableNgnWalletStore implements NgnWalletStore {
+    private impl: NgnWalletStore = new InMemoryNgnWalletStore()
+    use(impl: NgnWalletStore) { this.impl = impl }
+    createWallet(userId: string) { return this.impl.createWallet(userId) }
+    getWalletByUserId(userId: string) { return this.impl.getWalletByUserId(userId) }
+    getWalletById(walletId: string) { return this.impl.getWalletById(walletId) }
+    createLedgerEntry(entry: Omit<LedgerEntry, 'entryId' | 'createdAt'>) { return this.impl.createLedgerEntry(entry) }
+    getLedgerEntriesByWalletId(walletId: string) { return this.impl.getLedgerEntriesByWalletId(walletId) }
+    listLedgerEntriesByReferenceType(referenceType: string) { return this.impl.listLedgerEntriesByReferenceType(referenceType) }
+    listWallets(options?: { limit?: number; cursor?: string }) { return this.impl.listWallets(options) }
+    acquireLock(walletId: string) { return this.impl.acquireLock(walletId) }
+    clear() { return this.impl.clear() }
+}
+
+const switchableNgnWalletStore = new SwitchableNgnWalletStore()
+export const ngnWalletStore: NgnWalletStore = switchableNgnWalletStore
+
+export function initNgnWalletStore(impl: NgnWalletStore): void {
+    switchableNgnWalletStore.use(impl)
+}

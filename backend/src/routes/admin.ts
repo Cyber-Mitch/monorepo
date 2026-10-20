@@ -26,10 +26,6 @@ import {
 import { AppError, notFound } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { validate } from "../middleware/validate.js";
-import {
-  assertAdminSecret,
-  requireAdminSecret,
-} from "../middleware/adminSecret.js";
 import { markRewardPaidSchema } from "../schemas/reward.js";
 import {
   adminListingFiltersSchema,
@@ -47,6 +43,7 @@ import { ReceiptIndexer } from "../indexer/worker.js";
 import { kycRepository } from "../repositories/KycRepository.js";
 import { paymentDisputeRepository } from "../repositories/PaymentDisputeRepository.js";
 import { v4 as uuidv4 } from "uuid";
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 export function createAdminRouter(
   adapter: SorobanAdapter,
@@ -63,7 +60,7 @@ export function createAdminRouter(
    */
   router.get(
     "/flags",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'view'),
     (req: Request, res: Response, next: NextFunction) => {
       try {
         res.json({
@@ -81,6 +78,7 @@ export function createAdminRouter(
 
   router.post(
     "/wallets/rewrap",
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         if (!walletStore || !encryptionService) {
@@ -91,7 +89,6 @@ export function createAdminRouter(
           );
         }
 
-        assertAdminSecret(req);
 
         const fromKeyId =
           typeof req.body.fromKeyId === "string"
@@ -238,7 +235,7 @@ export function createAdminRouter(
    */
   router.get(
     "/outbox/health",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const summary = await outboxStore.getHealthSummary();
@@ -266,7 +263,7 @@ export function createAdminRouter(
    */
   router.get(
     "/outbox/dead-letter",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
@@ -292,7 +289,7 @@ export function createAdminRouter(
    */
   router.get(
     "/outbox",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { status, limit } = req.query;
@@ -358,7 +355,7 @@ export function createAdminRouter(
    */
   router.post(
     "/outbox/:id/mark-dead",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { id } = req.params;
@@ -431,7 +428,7 @@ export function createAdminRouter(
    */
   router.post(
     "/outbox/:id/retry",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { id } = req.params;
@@ -491,7 +488,7 @@ export function createAdminRouter(
    */
   router.post(
     "/outbox/retry-all",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         logger.info("Retry all failed items requested", {
@@ -530,6 +527,7 @@ export function createAdminRouter(
    */
   router.post(
     "/rewards/:rewardId/mark-paid",
+    requireAdminAccess('chain_admin', 'execute'),
     validate(markRewardPaidSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -683,6 +681,7 @@ export function createAdminRouter(
    */
   router.get(
     "/whistleblower/listings",
+    requireAdminAccess('chain_admin', 'view'),
     validate(adminListingFiltersSchema, "query"),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -738,6 +737,7 @@ export function createAdminRouter(
    */
   router.post(
     "/whistleblower/listings/:id/approve",
+    requireAdminAccess('chain_admin', 'execute'),
     validate(approveListingSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -809,6 +809,7 @@ export function createAdminRouter(
    */
   router.post(
     "/whistleblower/listings/:id/reject",
+    requireAdminAccess('chain_admin', 'execute'),
     validate(rejectListingSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -870,9 +871,9 @@ export function createAdminRouter(
    */
   router.get(
     "/indexer/metrics",
+    requireAdminAccess('chain_admin', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        assertAdminSecret(req);
 
         if (!indexer) {
           throw new AppError(
@@ -905,9 +906,9 @@ export function createAdminRouter(
    */
   router.post(
     "/indexer/pause",
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        assertAdminSecret(req);
 
         if (!indexer) {
           throw new AppError(
@@ -954,9 +955,9 @@ export function createAdminRouter(
    */
   router.post(
     "/indexer/resume",
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        assertAdminSecret(req);
 
         if (!indexer) {
           throw new AppError(
@@ -1005,7 +1006,7 @@ export function createAdminRouter(
    */
   router.post(
     "/kyc/bulk",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { action, ids, reason } = req.body as {
@@ -1227,7 +1228,7 @@ export function createAdminRouter(
    */
   router.post(
     "/disputes/bulk",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { action, ids, resolution } = req.body as {
@@ -1378,7 +1379,7 @@ export function createAdminRouter(
    */
   router.post(
     "/listings/bulk",
-    requireAdminSecret,
+    requireAdminAccess('chain_admin', 'execute'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { action, ids } = req.body as {
@@ -1554,6 +1555,7 @@ export function createAdminRouter(
    */
   router.get(
     "/receipts",
+    requireAdminAccess('chain_admin', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         if (!indexer?.receiptRepository) {

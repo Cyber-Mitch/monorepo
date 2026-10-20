@@ -2,9 +2,9 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { getPool } from '../db.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { assertAdminSecret as requireAdmin } from '../middleware/adminSecret.js'
 import { generateId } from '../utils/tokens.js'
 import { logger } from '../utils/logger.js'
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 /**
  * Admin tools for dead-letter queue replay (settlement outbox).
@@ -15,9 +15,9 @@ export function createSettlementAdminRouter() {
 
   r.post(
     '/settlement-dlq/:id/replay',
+    requireAdminAccess('settlement', 'manage'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const pool = await getPool()
         if (!pool) {
           throw new AppError(ErrorCode.INTERNAL_ERROR, 501, 'Database required for DLQ replay')
@@ -72,9 +72,9 @@ export function createSettlementAdminRouter() {
 
   r.get(
     '/settlement-dlq',
+    requireAdminAccess('settlement', 'view'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdmin(req)
         const pool = await getPool()
         if (!pool) {
           return res.json({ items: [] })

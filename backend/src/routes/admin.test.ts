@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import request from 'supertest'
 import express from 'express'
 import { errorHandler } from '../middleware/errorHandler.js'
@@ -12,6 +12,7 @@ import { paymentDisputeRepository } from '../repositories/PaymentDisputeReposito
 import { ReceiptIndexer } from '../indexer/worker.js'
 import { RewardStatus } from '../models/reward.js'
 import { ListingStatus } from '../models/listing.js'
+import { adminAuthHeader, seedAdminSession } from '../test-fixtures/adminAuth.js'
 
 vi.mock('../soroban/adapter.js', () => ({
   SorobanAdapter: vi.fn().mockImplementation(() => ({
@@ -129,77 +130,81 @@ function buildApp() {
 }
 
 describe('Admin Routes', () => {
+  beforeEach(async () => {
+    await seedAdminSession()
+  })
+
   describe('GET /api/admin/flags', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp()).get('/api/admin/flags')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
 
-    it('should reject request with invalid admin secret', async () => {
+    it('should reject request with an invalid token', async () => {
       const res = await request(buildApp())
         .get('/api/admin/flags')
-        .set('x-admin-secret', 'wrong-secret')
+        .set('Authorization', 'Bearer not-a-real-token')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('INVALID_TOKEN')
     })
   })
 
   describe('GET /api/admin/outbox/health', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp()).get('/api/admin/outbox/health')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
   })
 
   describe('GET /api/admin/outbox/dead-letter', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp()).get('/api/admin/outbox/dead-letter')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
   })
 
   describe('GET /api/admin/outbox', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp()).get('/api/admin/outbox')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
   })
 
   describe('POST /api/admin/outbox/:id/mark-dead', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp())
         .post('/api/admin/outbox/outbox-3/mark-dead')
         .send({ reason: 'Test' })
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
   })
 
   describe('POST /api/admin/outbox/:id/retry', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp()).post('/api/admin/outbox/outbox-5/retry')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
   })
 
   describe('POST /api/admin/outbox/retry-all', () => {
-    it('should reject request without admin secret', async () => {
+    it('should reject request without authentication', async () => {
       const res = await request(buildApp()).post('/api/admin/outbox/retry-all')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
   })
 
@@ -235,7 +240,7 @@ describe('Admin Routes', () => {
         totalPages: 1,
       })
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .get('/api/admin/whistleblower/listings')
 
       expect(res.status).toBe(200)
@@ -257,7 +262,7 @@ describe('Admin Routes', () => {
         totalPages: 0,
       })
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .get('/api/admin/whistleblower/listings?status=approved')
 
       expect(res.status).toBe(200)
@@ -272,7 +277,7 @@ describe('Admin Routes', () => {
         totalPages: 2,
       })
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .get('/api/admin/whistleblower/listings?page=2&pageSize=50')
 
       expect(res.status).toBe(200)
@@ -328,7 +333,7 @@ describe('Admin Routes', () => {
         rejectionReason: undefined,
       } as any)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/listing-2/approve')
         .send({ reviewedBy: 'admin-1' })
 
@@ -339,7 +344,7 @@ describe('Admin Routes', () => {
     it('should return 404 for non-existent listing', async () => {
       vi.mocked(listingStore.getById).mockResolvedValue(null)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/non-existent/approve')
         .send({ reviewedBy: 'admin-1' })
 
@@ -374,7 +379,7 @@ describe('Admin Routes', () => {
         status: 'approved',
       } as any)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/listing-3/approve')
         .send({ reviewedBy: 'admin-1' })
 
@@ -409,7 +414,7 @@ describe('Admin Routes', () => {
         status: 'pending',
       } as any)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/listing-4/approve')
         .send({ reviewedBy: 'admin-1' })
 
@@ -463,7 +468,7 @@ describe('Admin Routes', () => {
         photos: [],
       } as any)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/listing-5/reject')
         .send({ reviewedBy: 'admin-1', reason: 'Invalid photos' })
 
@@ -475,7 +480,7 @@ describe('Admin Routes', () => {
     it('should return 404 for non-existent listing', async () => {
       vi.mocked(listingStore.getById).mockResolvedValue(null)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/non-existent/reject')
         .send({ reviewedBy: 'admin-1', reason: 'Test' })
 
@@ -506,7 +511,7 @@ describe('Admin Routes', () => {
         rejectionReason: undefined,
       } as any)
 
-      const res = await request(buildApp())
+      const res = await request.agent(buildApp()).set(adminAuthHeader)
         .post('/api/admin/whistleblower/listings/listing-6/reject')
         .send({ reviewedBy: 'admin-1', reason: 'Test' })
 

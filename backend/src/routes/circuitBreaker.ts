@@ -9,10 +9,10 @@ import { logger } from "../utils/logger.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { validate } from "../middleware/validate.js";
-import { requireAdminSecret } from "../middleware/adminSecret.js";
 import { auditLog, extractAuditContext } from "../utils/auditLogger.js";
 import { describeGateResult, executeOrPropose } from "../services/multisigGate.js";
 import { z } from "zod";
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 // Validation schemas
 /** A BytesN<32>, as 64 hex characters, as the deal_escrow contract's drain functions take. */
@@ -57,7 +57,7 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/freeze",
-    requireAdminSecret,
+    requireAdminAccess('circuit_breaker', 'execute', { audit: false }),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         if (!adapter.freeze) {
@@ -96,7 +96,7 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
    */
   router.get(
     "/status",
-    requireAdminSecret,
+    requireAdminAccess('circuit_breaker', 'view', { audit: false }),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         if (!adapter.isFrozen || !adapter.getCircuitBreakerState) {
@@ -128,7 +128,7 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/propose-drain",
-    requireAdminSecret,
+    requireAdminAccess('circuit_breaker', 'execute', { freshAuth: true, audit: false }),
     validate(proposeDrainSchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -190,7 +190,7 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/execute-drain",
-    requireAdminSecret,
+    requireAdminAccess('circuit_breaker', 'execute', { freshAuth: true, audit: false }),
     validate(executeDrainSchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -251,7 +251,7 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
    */
   router.post(
     "/set-recovery-delay",
-    requireAdminSecret,
+    requireAdminAccess('circuit_breaker', 'execute', { audit: false }),
     validate(setRecoveryDelaySchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {

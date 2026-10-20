@@ -28,6 +28,8 @@ import { createSorobanAdapter } from "./soroban/index.js";
 import { createBalanceRouter } from "./routes/balance.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createAdminRouter } from "./routes/admin.js";
+import { initNgnWalletStore, PostgresNgnWalletStore } from "./models/ngnWalletStore.js";
+import { initNgnWithdrawalStore, PostgresNgnWithdrawalStore } from "./models/ngnWithdrawalStore.js";
 import { createAdminContractAccessRouter } from "./routes/adminContractAccess.js";
 import { createDealsRouter } from "./routes/deals.js";
 import { createWhistleblowerRouter } from "./routes/whistleblower.js";
@@ -671,6 +673,9 @@ export function createApp() {
   // Tenant Application Store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
     initTenantApplicationStore(new PostgresTenantApplicationStore());
+    // NGN ledger and withdrawals persist together (#1944).
+    initNgnWalletStore(new PostgresNgnWalletStore());
+    initNgnWithdrawalStore(new PostgresNgnWithdrawalStore());
     initSavedPropertyStore(new PostgresSavedPropertyStore());
     initLandlordPayoutScheduleStore(new PostgresLandlordPayoutScheduleStore());
     initTenantDataExportStore(new PostgresTenantDataExportStore());

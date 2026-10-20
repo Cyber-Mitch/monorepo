@@ -24,19 +24,13 @@ import {
   approveWhistleblowerApplicationSchema,
   rejectWhistleblowerApplicationSchema,
 } from '../schemas/whistleblowerApplication.js'
+import { requireAdminAccess } from '../middleware/adminAccess.js'
 
 /**
  * Factory function to create admin whistleblower application router
  */
 export function createAdminWhistleblowerApplicationsRouter(): Router {
   const router = Router()
-
-  function requireAdminSecret(req: Request): void {
-    const headerSecret = req.headers['x-admin-secret']
-    if (env.MANUAL_ADMIN_SECRET && headerSecret !== env.MANUAL_ADMIN_SECRET) {
-      throw new AppError(ErrorCode.FORBIDDEN, 403, 'Invalid admin secret')
-    }
-  }
 
   /**
    * GET /api/admin/whistleblower-applications
@@ -47,10 +41,10 @@ export function createAdminWhistleblowerApplicationsRouter(): Router {
    */
   router.get(
     '/',
+    requireAdminAccess('whistleblower_applications', 'view'),
     validate(listWhistleblowerApplicationsSchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdminSecret(req)
 
         const filters = req.query as {
           status?: 'pending' | 'approved' | 'rejected'
@@ -93,10 +87,10 @@ export function createAdminWhistleblowerApplicationsRouter(): Router {
    */
   router.get(
     '/:applicationId',
+    requireAdminAccess('whistleblower_applications', 'view'),
     validate(getWhistleblowerApplicationSchema, 'params'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdminSecret(req)
 
         const { applicationId } = req.params
 
@@ -129,11 +123,11 @@ export function createAdminWhistleblowerApplicationsRouter(): Router {
    */
   router.post(
     '/:applicationId/approve',
+    requireAdminAccess('whistleblower_applications', 'manage'),
     validate(getWhistleblowerApplicationSchema, 'params'),
     validate(approveWhistleblowerApplicationSchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdminSecret(req)
 
         const { applicationId } = req.params
         const { reviewedBy } = req.body as { reviewedBy: string }
@@ -202,11 +196,11 @@ export function createAdminWhistleblowerApplicationsRouter(): Router {
    */
   router.post(
     '/:applicationId/reject',
+    requireAdminAccess('whistleblower_applications', 'manage'),
     validate(getWhistleblowerApplicationSchema, 'params'),
     validate(rejectWhistleblowerApplicationSchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        requireAdminSecret(req)
 
         const { applicationId } = req.params
         const { reviewedBy, reason } = req.body as { reviewedBy: string; reason: string }
