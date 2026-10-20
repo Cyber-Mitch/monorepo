@@ -3627,306 +3627,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-  /api/v1/governance/proposals:
-    get:
-      summary: List governance proposals
-      description: |
-        Lists all stake-weighted governance proposals (contracts/governance), from id 1
-        through the on-chain proposal count. Distinct from the timelock admin queue
-        (/api/v1/admin-timelock), which is an unrelated contract.
-      operationId: listGovernanceProposals
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Proposals fetched
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GovernanceProposalListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/{id}:
-    get:
-      summary: Get a single governance proposal
-      operationId: getGovernanceProposal
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/GovernanceProposalId'
-      responses:
-        '200':
-          description: Proposal fetched
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GovernanceProposalResponse'
-        '404':
-          $ref: '#/components/responses/Error'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/prepare:
-    post:
-      summary: Prepare an unsigned create_proposal transaction
-      description: |
-        Builds an unsigned Soroban transaction envelope for `create_proposal`, sourced
-        from the caller's linked Stellar address. The contract calls `proposer.require_auth()`,
-        so this backend cannot sign on the caller's behalf — the connected wallet must sign
-        the returned XDR and post it to `/api/v1/governance/proposals/submit`.
-
-        Rejects with 403 if the caller's staked balance is below MIN_STAKE_TO_PROPOSE. This is
-        an informational pre-check against the real staking_pool balance; the authoritative
-        gate remains the governance contract's own on-chain check.
-      operationId: prepareGovernanceProposal
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PrepareGovernanceProposalRequest'
-      responses:
-        '200':
-          description: Unsigned transaction ready for the caller's wallet to sign
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UnsignedTransactionResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '403':
-          description: Staked balance is below MIN_STAKE_TO_PROPOSE
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/submit:
-    post:
-      summary: Submit a wallet-signed create_proposal transaction
-      operationId: submitGovernanceProposal
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SubmitSignedTransactionRequest'
-      responses:
-        '200':
-          description: Transaction broadcast and confirmed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GovernanceTxResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/{id}/vote/prepare:
-    post:
-      summary: Prepare an unsigned vote transaction
-      description: |
-        Builds an unsigned `vote` transaction sourced from the caller's linked Stellar
-        address. Vote weight is the voter's stake, snapshotted on-chain at the moment of
-        their first vote on this proposal — this backend performs no weight calculation.
-      operationId: prepareGovernanceVote
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/GovernanceProposalId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GovernanceVoteRequest'
-      responses:
-        '200':
-          description: Unsigned transaction ready for the caller's wallet to sign
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UnsignedTransactionResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/{id}/vote/submit:
-    post:
-      summary: Submit a wallet-signed vote transaction
-      operationId: submitGovernanceVote
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/GovernanceProposalId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SubmitSignedTransactionRequest'
-      responses:
-        '200':
-          description: Vote transaction broadcast and confirmed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GovernanceTxResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/{id}/finalize:
-    post:
-      summary: Finalize a proposal after its voting period ends
-      description: |
-        `finalize_proposal` is permissionless on-chain (no require_auth) — any authenticated
-        caller may trigger it once the voting period has elapsed; the backend's operational
-        key only pays the fee.
-      operationId: finalizeGovernanceProposal
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/GovernanceProposalId'
-      responses:
-        '200':
-          description: Proposal finalized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GovernanceTxResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/governance/proposals/{id}/execute:
-    post:
-      summary: Execute a passed proposal after its timelock elapses
-      description: |
-        `execute_proposal` is permissionless on-chain and has no direct on-chain effect
-        beyond flipping the proposal's status and emitting `proposal_executed` — applying
-        `proposedValue` to whatever `paramKey` represents is an off-chain/other-contract
-        action driven by that event.
-      operationId: executeGovernanceProposal
-      tags:
-        - Governance
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/GovernanceProposalId'
-      responses:
-        '200':
-          description: Proposal executed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GovernanceTxResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/vesting-schedule/claimable:
-    get:
-      summary: Get the authenticated user's claimable vested tokens
-      description: Uses the Stellar wallet linked to the authenticated user. Address query parameters are not accepted.
-      operationId: getOwnClaimableVestedTokens
-      tags:
-        - Vesting
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Claimable vested-token amount for the authenticated wallet
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [beneficiary, claimableAmount]
-                properties:
-                  beneficiary:
-                    type: string
-                    description: Stellar wallet linked to the authenticated user
-                  claimableAmount:
-                    type: string
-                    description: Claimable amount in contract base units
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/v1/vesting-schedule/claim:
-    post:
-      summary: Claim vested tokens for the authenticated user
-      description: Claims only for the Stellar wallet linked to the authenticated user. The request body must be empty.
-      operationId: claimOwnVestedTokens
-      tags:
-        - Vesting
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Vested tokens claimed
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, beneficiary, claimedAmount, message]
-                properties:
-                  success:
-                    type: boolean
-                  beneficiary:
-                    type: string
-                  claimedAmount:
-                    type: string
-                  message:
-                    type: string
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        default:
-          $ref: '#/components/responses/Error'
-
   /api/v1/whistleblower-rewards/claimable:
     get:
       summary: Get the authenticated user's claimable whistleblower reward
@@ -3991,18 +3691,3031 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/v1/tenant/documents:
+    get:
+      summary: List the caller's documents
+      description: >-
+        Paginated list of the authenticated tenant's confirmed documents, newest first.
+        Owner-scoped; pending (unconfirmed) uploads are excluded.
+      operationId: listTenantDocuments
+      tags:
+        - Tenant Documents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            $ref: "#/components/schemas/TenantDocumentCategory"
+        - name: dealId
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Case-insensitive match on file name or description.
+          schema:
+            type: string
+            maxLength: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Documents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, pagination]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TenantDocument"
+                  pagination:
+                    type: object
+                    required: [page, pageSize, total, totalPages]
+                    properties:
+                      page:
+                        type: integer
+                      pageSize:
+                        type: integer
+                      total:
+                        type: integer
+                      totalPages:
+                        type: integer
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      summary: Confirm a presigned upload
+      description: >-
+        Second step of the presigned upload flow. Records the file metadata for one of the
+        caller's own pending uploads (identified by its objectKey). Enforces the 20 MB file
+        limit and the 500 MB per-tenant quota.
+      operationId: confirmTenantDocumentUpload
+      tags:
+        - Tenant Documents
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectKey, fileSizeBytes]
+              properties:
+                objectKey:
+                  type: string
+                  maxLength: 512
+                fileName:
+                  type: string
+                  maxLength: 255
+                fileSizeBytes:
+                  type: integer
+                  minimum: 1
+                  maximum: 20971520
+      responses:
+        "201":
+          description: Upload confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TenantDocument"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No pending upload with this objectKey belongs to the caller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/v1/tenant/documents/presign:
+    post:
+      summary: Start a presigned document upload
+      description: >-
+        Creates a pending document and returns a presigned PUT URL for an object key under the
+        caller's own storage prefix. Only PDF, JPEG and PNG are accepted. When category is
+        omitted it is derived from docType (id_card and passport → identity_document,
+        others → other).
+      operationId: presignTenantDocumentUpload
+      tags:
+        - Tenant Documents
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [docType, contentType]
+              properties:
+                docType:
+                  type: string
+                  enum: [id_card, passport, employment_letter, bank_statement, utility_bill, proof_of_address]
+                contentType:
+                  type: string
+                  enum: [application/pdf, image/jpeg, image/png]
+                category:
+                  $ref: "#/components/schemas/TenantDocumentCategory"
+                description:
+                  type: string
+                  maxLength: 500
+                dealId:
+                  type: string
+                  maxLength: 128
+      responses:
+        "201":
+          description: Upload URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [documentId, uploadUrl, objectKey, expiresAt]
+                    properties:
+                      documentId:
+                        type: string
+                      uploadUrl:
+                        type: string
+                        format: uri
+                      objectKey:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/v1/tenant/documents/{id}:
+    delete:
+      summary: Delete one of the caller's documents
+      description: >-
+        Soft-deletes the document and removes the stored object. Returns 404 for documents
+        that do not exist or belong to another user, and 403 for read-only leases provided by
+        the landlord. Audit-logged.
+      operationId: deleteTenantDocument
+      tags:
+        - Tenant Documents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Document deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [documentId, deleted]
+                    properties:
+                      documentId:
+                        type: string
+                      deleted:
+                        type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Read-only landlord-provided document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/v1/tenant/documents/{id}/download:
+    get:
+      summary: Get a short-lived download URL
+      description: >-
+        Returns a presigned download URL for one of the caller's documents, valid for
+        expiresInSeconds (15 minutes). Returns 404 for another user's document. Audit-logged.
+      operationId: downloadTenantDocument
+      tags:
+        - Tenant Documents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Download URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [documentId, downloadUrl, expiresInSeconds]
+                    properties:
+                      documentId:
+                        type: string
+                      downloadUrl:
+                        type: string
+                        format: uri
+                      expiresInSeconds:
+                        type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/v1/user/erasure:
+    post:
+      summary: Request account erasure
+      description: |
+        Creates a pending NDPA/GDPR right-to-erasure request for the caller. An
+        admin with `erasure:manage` must confirm it before `confirmBy` (30 days),
+        otherwise the data-retention job expires it.
+
+        Shelterflex accounts have no password, so the caller must re-confirm
+        their identity with a FRESH login proof of the same kind they log in
+        with, exactly one of:
+        - `otp`: a code obtained from `POST /api/v1/auth/request-otp` for the
+          account's email (consumed on success; same expiry/attempt limits as login);
+        - `signedChallengeXdr`: for wallet-only accounts, the challenge from
+          `POST /api/v1/auth/wallet/challenge` signed by the linked wallet.
+
+        Refused with 409 while the user is a party (tenant or landlord) to an
+        active or at-risk deal, or holds a non-zero NGN wallet balance.
+      operationId: requestAccountErasure
+      tags:
+        - Erasure
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              description: Provide exactly one of otp or signedChallengeXdr.
+              properties:
+                otp:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                signedChallengeXdr:
+                  type: string
+      responses:
+        '201':
+          description: Erasure request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureRequestEnvelope'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Re-authentication failed (wrong, expired or missing OTP / wallet signature)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            A request is already pending, or erasure is blocked. When blocked,
+            `error.details.blockers` lists what must be settled first
+            (`active_deal` with `count`, `wallet_balance` with `balanceNgn`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+    get:
+      summary: Get my latest erasure request
+      description: Returns the caller's most recent erasure request (any status) including `confirmBy`, or `null` if none exists.
+      operationId: getAccountErasure
+      tags:
+        - Erasure
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Latest erasure request, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/ErasureRequest'
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      summary: Cancel my pending erasure request
+      description: Cancels the caller's pending erasure request.
+      operationId: cancelAccountErasure
+      tags:
+        - Erasure
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Request cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureRequestEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No pending erasure request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/erasure:
+    get:
+      summary: List erasure requests (admin)
+      description: Lists erasure requests, newest first. Requires the `erasure:manage` permission.
+      operationId: listErasureRequestsAdmin
+      tags:
+        - Erasure
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ErasureRequestStatus'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Erasure requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, total, limit, offset]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErasureRequest'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller lacks the erasure:manage permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/erasure/{id}/confirm:
+    post:
+      summary: Confirm an erasure request (admin)
+      description: |
+        Confirms a pending, not-yet-overdue erasure request and anonymises the
+        user's PII (ErasureService.confirmErasure). The active-deal and wallet
+        balance checks are repeated first. Irreversible. Requires `erasure:manage`.
+      operationId: confirmErasureRequestAdmin
+      tags:
+        - Erasure
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Erasure completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureRequestEnvelope'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller lacks the erasure:manage permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Erasure request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Request is not pending (completed / cancelled / expired), is past
+            `confirmBy`, or erasure is blocked by an active deal or non-zero
+            wallet balance (see `error.details.blockers`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/messaging/conversations:
+    post:
+      summary: Create a conversation
+      description: >-
+        Creates a conversation between the caller and the listed participants. The caller is
+        always added (role `admin`); other participants get role `member`. Part of the minimal
+        messaging core (#1896 subset).
+      operationId: createMessagingConversation
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participantIds]
+              properties:
+                participantIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  description: User ids to add; must include at least one user other than the caller.
+                  items:
+                    type: string
+                subjectType:
+                  type: string
+                  maxLength: 64
+                  example: deal
+                subjectId:
+                  type: string
+                  maxLength: 128
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/MessagingConversation'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+    get:
+      summary: List the caller's conversations
+      description: Conversations the caller participates in, most recently active first.
+      operationId: listMessagingConversations
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessagingConversation'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/messaging/conversations/{id}/messages:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: List messages in a conversation
+      description: Non-deleted messages, newest first. Participants only.
+      operationId: listMessagingMessages
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: before
+          in: query
+          required: false
+          description: Only return messages created strictly before this timestamp.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessagingMessage'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a participant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      summary: Send a message
+      description: >-
+        Sends a message to the conversation. Participants only. A message needs a non-empty
+        `body` or an `attachment`. An attachment must reference an object issued by the
+        presign endpoint for this same conversation (`messaging/{conversationId}/...`) that has
+        been uploaded; its stored size and content type are re-checked (images or PDF, at most
+        10 MB). An object key can be attached to only one message.
+      operationId: sendMessagingMessage
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body:
+                  type: string
+                  maxLength: 4000
+                attachment:
+                  $ref: '#/components/schemas/MessagingAttachment'
+      responses:
+        '201':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/MessagingMessage'
+        '400':
+          description: >-
+            Validation failed: empty message, disallowed type/size, key outside this
+            conversation's prefix, object not uploaded, or stored object does not match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a participant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Attachment object is already used by another message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/messaging/conversations/{id}/attachments/presign:
+    post:
+      summary: Get a presigned upload URL for a message attachment
+      description: >-
+        Issues a presigned PUT URL (valid 10 minutes) for an object under
+        `messaging/{conversationId}/{uuid}-{safeFileName}`. Participants only. Allowed types:
+        image/jpeg, image/png, image/webp, image/gif, application/pdf. Maximum size 10 MB. The
+        upload must use the declared Content-Type. Pass the returned `objectKey` as
+        `attachment.objectKey` when sending the message.
+      operationId: presignMessagingAttachment
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, contentType, size]
+              properties:
+                fileName:
+                  type: string
+                  maxLength: 255
+                contentType:
+                  $ref: '#/components/schemas/MessagingAttachmentContentType'
+                size:
+                  type: integer
+                  minimum: 1
+                  maximum: 10485760
+      responses:
+        '201':
+          description: Upload URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [uploadUrl, objectKey, expiresAt]
+                    properties:
+                      uploadUrl:
+                        type: string
+                      objectKey:
+                        type: string
+                        example: messaging/0f8c2a3e-1b2c-4d5e-8f90-123456789abc/5d0c9f8e-7a6b-4c5d-9e8f-0a1b2c3d4e5f-lease.pdf
+                      expiresAt:
+                        type: string
+                        format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a participant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/messaging/messages/{id}:
+    delete:
+      summary: Delete one of your messages
+      description: >-
+        Soft-deletes a message (sets `deletedAt`). Only the sender may delete. If the message
+        has an attachment, the stored object is deleted immediately on a best-effort basis;
+        storage failures are logged and do not fail the request.
+      operationId: deleteMessagingMessage
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Message deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/MessagingMessage'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not the sender or not a participant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Message not found or already deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/messaging/messages/{id}/attachment:
+    get:
+      summary: Get a download URL for a message attachment
+      description: >-
+        Returns a presigned download URL that expires in at most 5 minutes (300 seconds).
+        Participants only.
+      operationId: getMessagingAttachmentDownloadUrl
+      tags:
+        - Messaging
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Download URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [downloadUrl, expiresAt, fileName, contentType, size]
+                    properties:
+                      downloadUrl:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+                      fileName:
+                        type: string
+                      contentType:
+                        $ref: '#/components/schemas/MessagingAttachmentContentType'
+                      size:
+                        type: integer
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a participant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Message not found, deleted, or has no attachment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspections:
+    post:
+      summary: Create a property inspection
+      description: |
+        Creates a `pending` inspection for a listing. Only callers with a
+        `verified` inspector profile may create inspections; the caller becomes
+        the assigned inspector (`inspectorId`) and is the only user allowed to
+        act on it.
+      operationId: createPropertyInspection
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listingId, scheduledAt]
+              properties:
+                listingId:
+                  type: string
+                  format: uuid
+                scheduledAt:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Inspection created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyInspectionEnvelope'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspections/{id}/start:
+    patch:
+      summary: Start an inspection
+      description: Transitions the inspection from `pending` to `in_progress`. Assigned verified inspector only.
+      operationId: startPropertyInspection
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      responses:
+        '200':
+          description: Inspection started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyInspectionEnvelope'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspections/{id}/checklist:
+    put:
+      summary: Upsert inspection checklist items
+      description: |
+        Inserts or updates checklist items keyed by (`category`, `item`). Only
+        allowed while the inspection is `in_progress`. Returns every item on
+        the inspection.
+      operationId: upsertInspectionChecklist
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [category, item, result]
+                    properties:
+                      category:
+                        $ref: '#/components/schemas/InspectionCategory'
+                      item:
+                        type: string
+                        minLength: 1
+                        maxLength: 200
+                      result:
+                        $ref: '#/components/schemas/InspectionResult'
+                      notes:
+                        type: string
+                        maxLength: 2000
+      responses:
+        '200':
+          description: Checklist saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/InspectionChecklistItem'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspections/{id}/photos/presign:
+    post:
+      summary: Get a presigned upload URL for an inspection photo
+      description: |
+        Returns a presigned PUT URL and the `objectKey` to register via
+        `POST /api/v1/inspections/{id}/photos` after uploading. Only allowed
+        while the inspection is `in_progress`.
+      operationId: presignInspectionPhoto
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contentType]
+              properties:
+                contentType:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp, image/heic]
+      responses:
+        '200':
+          description: Presigned upload issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [uploadUrl, objectKey, expiresAt]
+                    properties:
+                      uploadUrl:
+                        type: string
+                      objectKey:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspections/{id}/photos:
+    post:
+      summary: Register an uploaded inspection photo
+      description: |
+        Records a photo previously uploaded with a presigned URL. `objectKey`
+        must be a key issued by the presign endpoint for this inspection. Only
+        allowed while the inspection is `in_progress`.
+      operationId: registerInspectionPhoto
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectKey]
+              properties:
+                objectKey:
+                  type: string
+                caption:
+                  type: string
+                  maxLength: 500
+                takenAt:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Photo registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/InspectionPhoto'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspections/{id}/submit:
+    post:
+      summary: Submit an inspection for review
+      description: |
+        Transitions `in_progress` -> `submitted`. Requires at least one
+        checklist item in each category (structural, plumbing, electrical,
+        safety, exterior) and at least 3 photos; otherwise responds 400 with
+        `details.missingCategories` and `details.photoCount`. No edits are
+        possible after submission.
+      operationId: submitPropertyInspection
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                inspectorNotes:
+                  type: string
+                  maxLength: 5000
+      responses:
+        '200':
+          description: Inspection submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyInspectionEnvelope'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspections:
+    get:
+      summary: List property inspections for review
+      description: Requires the `inspections:review` permission.
+      operationId: listPropertyInspectionsAdmin
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PropertyInspectionStatus'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Inspections, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PropertyInspection'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspections/{id}:
+    get:
+      summary: Get a property inspection with its checklist and photos
+      description: Requires the `inspections:review` permission.
+      operationId: getPropertyInspectionAdmin
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      responses:
+        '200':
+          description: Inspection detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/PropertyInspection'
+                      - type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/InspectionChecklistItem'
+                          photos:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/InspectionPhoto'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspections/{id}/approve:
+    post:
+      summary: Approve a submitted inspection
+      description: |
+        Requires the `inspections:review` permission. Transitions `submitted`
+        -> `approved` and, in the same database transaction, sets
+        `has_verified_inspection = true` on the listing and recomputes its
+        `trust_score` (0-100) from the checklist: weighted pass ratio with
+        structural/safety = 3, electrical/plumbing = 2, exterior = 1; `na`
+        items excluded; capped at 60 if any safety item failed; 50 when no
+        item was pass/fail.
+      operationId: approvePropertyInspection
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      responses:
+        '200':
+          description: Inspection approved and listing trust score updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [inspection, trustScore]
+                    properties:
+                      inspection:
+                        $ref: '#/components/schemas/PropertyInspection'
+                      trustScore:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspections/{id}/reject:
+    post:
+      summary: Reject a submitted inspection
+      description: Requires the `inspections:review` permission. Transitions `submitted` -> `rejected`; the listing is not changed.
+      operationId: rejectPropertyInspection
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - $ref: '#/components/parameters/InspectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+      responses:
+        '200':
+          description: Inspection rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyInspectionEnvelope'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        '409':
+          $ref: '#/components/responses/InspectionInvalidTransition'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspectors/{userId}/verification:
+    patch:
+      summary: Set an inspector's verification status
+      description: |
+        Requires the `inspectors:verify` permission. Upserts the user's
+        inspector profile with the given `verification_status`. Only
+        `verified` inspectors can create and work on inspections. This is a
+        minimal subset of inspector onboarding (#1902).
+      operationId: setInspectorVerification
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [pending, verified, suspended]
+      responses:
+        '200':
+          description: Inspector profile updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      userId:
+                        type: string
+                      verificationStatus:
+                        type: string
+                        enum: [pending, verified, suspended]
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/InspectionForbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/listings/{id}/inspection:
+    get:
+      summary: Public summary of a listing's latest approved inspection
+      description: |
+        Returns the latest approved inspection for an approved (publicly
+        visible) listing. Contains no inspector or reviewer identity and no
+        free-text notes. 404 when the listing is not public or has no
+        approved inspection.
+      operationId: getListingInspectionSummary
+      tags:
+        - Inspections
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Listing ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Inspection summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/ListingInspectionSummary'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/InspectionNotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/auth/sessions:
+    get:
+      summary: List the caller's active sessions
+      description: >-
+        One entry per device (sessions that share a refresh-token family are collapsed to
+        the newest). `current` is true for the session making this request.
+      operationId: listMySessions
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Active sessions, most recently active first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - sessions
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActiveSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      summary: Revoke the caller's sessions
+      description: >-
+        With `others=true`, revokes every session except the current device ("log out other
+        devices"). Without it, revokes all sessions including the current one. Matching
+        refresh tokens are invalidated too, so revoked tokens fail on the very next request.
+      operationId: revokeMySessions
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: others
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokedSessions'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/auth/sessions/{id}:
+    delete:
+      summary: Revoke one of the caller's sessions
+      description: >-
+        Also revokes every session in the same refresh-token family and invalidates its
+        refresh tokens. A session id belonging to another user returns 404.
+      operationId: revokeMySession
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+                    example: Session revoked
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/users/{userId}/sessions:
+    get:
+      summary: List a user's active sessions (admin)
+      description: Requires the `users:manage` permission.
+      operationId: listUserSessionsAdmin
+      tags:
+        - Auth
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: The user's active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - sessions
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActiveSession'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      summary: Force-logout a user (admin)
+      description: >-
+        Revokes every session and refresh token for the user and writes an
+        `ADMIN_USER_SESSIONS_REVOKED` audit log entry. Requires the `users:manage` permission.
+      operationId: revokeUserSessionsAdmin
+      tags:
+        - Auth
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokedSessions'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/landlord/partner-application:
+    post:
+      summary: Submit a partner landlord application
+      description: >-
+        Public and rate-limited (5 per hour per IP). Rejects a second submission from the same
+        email within 24 hours with 409 (it is not merged). Phone must be a Nigerian number
+        (`0803...`, `+234803...` or `234803...`) and is stored as `+234...`.
+      operationId: submitPartnerLandlordApplication
+      tags:
+        - Landlord
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerLandlordApplicationInput'
+      responses:
+        '201':
+          description: Application stored with status `pending`
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - application
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                  application:
+                    type: object
+                    required:
+                      - id
+                      - status
+                      - createdAt
+                    properties:
+                      id:
+                        type: string
+                        example: PLA-0b9c1c0e-6e3a-4b0a-9a55-2d1c0f6b7a11
+                      status:
+                        $ref: '#/components/schemas/PartnerApplicationStatus'
+                      createdAt:
+                        type: string
+                        format: date-time
+                  message:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/partner-applications:
+    get:
+      summary: List partner landlord applications
+      description: Requires the `landlords:manage` permission. Newest first.
+      operationId: listPartnerApplicationsAdmin
+      tags:
+        - Landlord
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PartnerApplicationStatus'
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Applications
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - applications
+                  - total
+                  - page
+                  - pageSize
+                properties:
+                  applications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PartnerLandlordApplication'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/partner-applications/{id}:
+    patch:
+      summary: Review a partner landlord application
+      description: >-
+        Sets status and/or notes and records the reviewing admin and time. At least one of
+        `status` or `notes` is required. Requires the `landlords:manage` permission.
+      operationId: updatePartnerApplicationAdmin
+      tags:
+        - Landlord
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/PartnerApplicationStatus'
+                notes:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          description: Updated application
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - application
+                properties:
+                  application:
+                    $ref: '#/components/schemas/PartnerLandlordApplication'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/deals/{dealId}/rent-guarantee/quote:
+    post:
+      summary: Quote a rent guarantee for a deal
+      description: >-
+        Landlord-only, for deals they own (anyone else gets 404). Prices the policy via the
+        configured provider (`RENT_GUARANTEE_PROVIDER`) and stores it as `quoted`. Re-quoting
+        returns the outstanding quote (200); a deal with an active policy returns 409.
+      operationId: quoteRentGuarantee
+      tags:
+        - Rent Guarantee
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: dealId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Existing outstanding quote returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RentGuaranteePolicyResponse'
+        '201':
+          description: New quote created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RentGuaranteePolicyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '501':
+          description: The configured provider is not integrated yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/rent-guarantee/policies:
+    get:
+      summary: List the landlord's rent guarantee policies
+      description: Only policies for the caller's own deals.
+      operationId: listRentGuaranteePolicies
+      tags:
+        - Rent Guarantee
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Policies, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - policies
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RentGuaranteePolicy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/rent-guarantee/policies/{id}/bind:
+    post:
+      summary: Bind (activate) a quoted policy
+      description: >-
+        quoted -> active. Idempotent: binding an already-active policy returns it unchanged,
+        and a repeated `Idempotency-Key` replays the first response. cancelled and claimed
+        policies return 409.
+      operationId: bindRentGuaranteePolicy
+      tags:
+        - Rent Guarantee
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RentGuaranteePolicyId'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Active policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RentGuaranteePolicyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/rent-guarantee/policies/{id}/cancel:
+    post:
+      summary: Cancel a quoted or active policy
+      description: quoted|active -> cancelled. Cancelled and claimed policies return 409.
+      operationId: cancelRentGuaranteePolicy
+      tags:
+        - Rent Guarantee
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RentGuaranteePolicyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+      responses:
+        '200':
+          description: Cancelled policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RentGuaranteePolicyResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/rent-guarantee/policies/{id}/claims:
+    post:
+      summary: File a claim against an active policy
+      description: >-
+        active -> claimed, recorded atomically with the claim. The amount cannot exceed the
+        deal's annual rent. Policies that are not active return 409.
+      operationId: fileRentGuaranteeClaim
+      tags:
+        - Rent Guarantee
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RentGuaranteePolicyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amountNgn
+                - reason
+              properties:
+                amountNgn:
+                  type: number
+                  exclusiveMinimum: 0
+                reason:
+                  type: string
+                  minLength: 10
+                  maxLength: 2000
+      responses:
+        '201':
+          description: Claim filed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - claim
+                  - policy
+                properties:
+                  claim:
+                    $ref: '#/components/schemas/RentGuaranteeClaim'
+                  policy:
+                    $ref: '#/components/schemas/RentGuaranteePolicy'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/tenant/credit-score:
+    get:
+      summary: Get the caller's latest credit score
+      description: |
+        Returns the most recent underwriting credit score snapshot for the
+        authenticated tenant, together with improvement tips derived from the
+        failing and warning factors. Tenants can only ever read their own score.
+        Returns 404 `NO_SCORE_YET` until the first snapshot has been recorded.
+        (#1901)
+      operationId: getTenantCreditScore
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Latest credit score
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      score:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                      band:
+                        type: string
+                        enum: [poor, fair, good, excellent]
+                      factors:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            status:
+                              type: string
+                              enum: [pass, fail, warn]
+                            weight:
+                              type: number
+                            detail:
+                              type: string
+                      computedAt:
+                        type: string
+                        format: date-time
+                      tips:
+                        type: array
+                        items:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The tenant has not been scored yet (code `NO_SCORE_YET`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/tenant/credit-score/history:
+    get:
+      summary: List the caller's credit score history
+      description: |
+        Returns the tenant's credit score snapshots, newest first. (#1901)
+      operationId: getTenantCreditScoreHistory
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 12
+      responses:
+        '200':
+          description: Snapshots, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        score:
+                          type: integer
+                        band:
+                          type: string
+                          enum: [poor, fair, good, excellent]
+                        computedAt:
+                          type: string
+                          format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/credit-score/{userId}:
+    get:
+      summary: Get a user's latest credit score (admin)
+      description: |
+        Requires the `underwriting:view` permission. Returns the latest
+        credit score snapshot for the given user. (#1901)
+      operationId: getAdminCreditScore
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Latest credit score for the user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      userId:
+                        type: string
+                      score:
+                        type: integer
+                      band:
+                        type: string
+                        enum: [poor, fair, good, excellent]
+                      factors:
+                        type: array
+                        items:
+                          type: object
+                      computedAt:
+                        type: string
+                        format: date-time
+                      tips:
+                        type: array
+                        items:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The user has not been scored yet (code `NO_SCORE_YET`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspector/onboarding:
+    post:
+      summary: Create or update the caller's inspector profile
+      description: |
+        Submits the caller's inspector profile. The profile is set to `pending`
+        and carries no inspector access until an admin verifies it. Service
+        areas must come from the fixed list in `config/inspectorServiceAreas.ts`.
+        Verified profiles cannot be changed here (409); suspended profiles
+        cannot re-onboard (403). (#1902)
+      operationId: submitInspectorOnboarding
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bio, serviceAreas]
+              properties:
+                bio:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                serviceAreas:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum: [Lagos, Abuja, Port Harcourt, Ibadan, Kano, Enugu, Kaduna, Benin City]
+      responses:
+        '200':
+          description: Existing profile updated and reset to pending
+        '201':
+          description: Profile created in pending status
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The inspector account is suspended
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/inspector/me:
+    get:
+      summary: Get the caller's inspector profile and status
+      description: Returns the caller's inspector profile. (#1902)
+      operationId: getMyInspectorProfile
+      tags:
+        - Inspections
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Inspector profile
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspectors:
+    get:
+      summary: List inspector profiles (admin)
+      description: Requires the `inspectors:manage` permission. (#1902)
+      operationId: listInspectorProfiles
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, verified, suspended]
+      responses:
+        '200':
+          description: Inspector profiles
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspectors/{userId}/verify:
+    post:
+      summary: Verify an inspector (admin)
+      description: |
+        Requires the `inspectors:manage` permission. The inspector must have an
+        approved KYC record, otherwise the request is rejected with 409. Verifying
+        an already verified inspector is a no-op. The inspector is notified. (#1902)
+      operationId: verifyInspector
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Inspector verified
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/inspectors/{userId}/suspend:
+    post:
+      summary: Suspend an inspector (admin)
+      description: |
+        Requires the `inspectors:manage` permission. A suspended inspector loses
+        inspector access immediately and is notified. (#1902)
+      operationId: suspendInspector
+      tags:
+        - Inspections
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Inspector suspended
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/landlord/payout-schedule:
+    get:
+      summary: Landlord payout schedule grouped into periods
+      description: |
+        Returns the caller's landlord payouts grouped into weekly (ISO week,
+        `YYYY-Www`) or monthly (`YYYY-MM`) periods, plus a summary over the
+        filtered set. Landlord-only; every payout is scoped to the caller. (#1892)
+      operationId: getLandlordPayoutSchedule
+      tags:
+        - Landlord
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: propertyId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [scheduled, processing, completed, delayed, failed, on_hold] } }
+        - { name: channel, in: query, schema: { type: string, enum: [bank_transfer, mobile_money, crypto_wallet, check] } }
+        - { name: grouping, in: query, schema: { type: string, enum: [weekly, monthly], default: monthly } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Periods and summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      periods: { type: array, items: { type: object } }
+                      summary: { type: object }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/landlord/payout-schedule/payouts:
+    get:
+      summary: Paginated landlord payouts
+      description: Same filters as the schedule endpoint, plus `page` and `pageSize` (max 100). (#1892)
+      operationId: listLandlordPayouts
+      tags:
+        - Landlord
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: propertyId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: channel, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: One page of payouts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { type: array, items: { type: object } }
+                  pagination:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      page: { type: integer }
+                      pageSize: { type: integer }
+                      totalPages: { type: integer }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/landlord/payout-schedule/preference:
+    get:
+      summary: Get the landlord's payout schedule preference
+      description: Defaults to `monthly`. (#1892)
+      operationId: getLandlordPayoutPreference
+      tags:
+        - Landlord
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current preference
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      summary: Update the landlord's payout schedule preference
+      description: Stored in `landlord_payout_preferences`. (#1892)
+      operationId: updateLandlordPayoutPreference
+      tags:
+        - Landlord
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schedulePreference]
+              properties:
+                schedulePreference:
+                  type: string
+                  enum: [activation, weekly, monthly]
+      responses:
+        '200':
+          description: Updated preference
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/landlord/payout-schedule/{payoutId}:
+    get:
+      summary: Get one landlord payout
+      description: Returns 404 for a payout that belongs to another landlord. (#1892)
+      operationId: getLandlordPayoutDetail
+      tags:
+        - Landlord
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: payoutId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The payout
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/tenant/data-export:
+    post:
+      summary: Request a copy of the caller's personal data
+      description: |
+        Queues an asynchronous export of the caller's data: profile, tenant
+        applications, deals (with schedules), documents metadata, notifications
+        and notification preferences. The archive is a ZIP with one JSON file per
+        domain plus `manifest.json`. Secrets (password hashes, tokens, wallet keys)
+        are never included.
+
+        Limits: one active request per user (409), and one new request per 24 hours
+        (429). The archive is available for 7 days after it is ready. (#1899)
+      operationId: requestTenantDataExport
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: Export queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/TenantDataExportStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          description: A request was already made in the last 24 hours
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/tenant/data-export/{id}:
+    get:
+      summary: Get a data export's status and download URL
+      description: |
+        Returns the export status (`pending`, `processing`, `ready`, `failed`, or
+        `expired`). When ready, includes a presigned `downloadUrl` valid for five
+        minutes; each issue is audited. Another user's export returns 404. (#1899)
+      operationId: getTenantDataExport
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Export status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/TenantDataExportStatus'
+                      - type: object
+                        properties:
+                          downloadUrl: { type: string, format: uri }
+                          downloadUrlExpiresAt: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   parameters:
-    GovernanceProposalId:
-      name: id
+    UserId:
+      name: userId
       in: path
       required: true
       schema:
-        type: integer
-        minimum: 1
-      description: Governance proposal id (1-based, contracts/governance/src/lib.rs:188)
-
+        type: string
+        format: uuid
+    RentGuaranteePolicyId:
+      name: id
+      in: path
+      required: true
+      description: Rent guarantee policy ID
+      schema:
+        type: string
+        format: uuid
+    InspectionId:
+      name: id
+      in: path
+      required: true
+      description: Property inspection ID
+      schema:
+        type: string
+        format: uuid
   schemas:
+    TenantDataExportStatus:
+      type: object
+      description: Status of a tenant personal-data export request (#1899)
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, ready, failed, expired]
+        requestedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        failureReason:
+          type: string
+          nullable: true
+    TenantDocumentCategory:
+      type: string
+      enum: [lease_agreement, payment_receipt, identity_document, inspection_report, other]
+    TenantDocument:
+      type: object
+      required:
+        - id
+        - userId
+        - fileName
+        - fileFormat
+        - fileSizeBytes
+        - category
+        - description
+        - dealId
+        - isLandlordUploaded
+        - createdAt
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        fileName:
+          type: string
+        fileFormat:
+          type: string
+          example: pdf
+        fileSizeBytes:
+          type: integer
+        category:
+          $ref: "#/components/schemas/TenantDocumentCategory"
+        description:
+          type: string
+          nullable: true
+        dealId:
+          type: string
+          nullable: true
+        isLandlordUploaded:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    ErasureRequestStatus:
+      type: string
+      enum: [pending, completed, cancelled, expired]
+    ErasureRequest:
+      type: object
+      required: [id, userId, status, requestedAt, confirmBy, confirmedAt, confirmedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ErasureRequestStatus'
+        requestedAt:
+          type: string
+          format: date-time
+        confirmBy:
+          type: string
+          format: date-time
+          description: Deadline for admin confirmation; pending requests past it are expired.
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        confirmedBy:
+          type: string
+          nullable: true
+          description: Admin user id that confirmed the erasure.
+    ErasureRequestEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ErasureRequest'
+    MessagingAttachmentContentType:
+      type: string
+      enum:
+        - image/jpeg
+        - image/png
+        - image/webp
+        - image/gif
+        - application/pdf
+
+    MessagingAttachment:
+      type: object
+      required: [objectKey, fileName, contentType, size]
+      properties:
+        objectKey:
+          type: string
+          description: Key returned by the presign endpoint for this conversation.
+        fileName:
+          type: string
+          maxLength: 255
+        contentType:
+          $ref: '#/components/schemas/MessagingAttachmentContentType'
+        size:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+
+    MessagingParticipant:
+      type: object
+      required: [userId, role, joinedAt]
+      properties:
+        userId:
+          type: string
+        role:
+          type: string
+          enum: [member, admin]
+        lastReadAt:
+          type: string
+          format: date-time
+        joinedAt:
+          type: string
+          format: date-time
+
+    MessagingConversation:
+      type: object
+      required: [id, participants, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        subjectType:
+          type: string
+        subjectId:
+          type: string
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessagingParticipant'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MessagingMessage:
+      type: object
+      required: [id, conversationId, senderId, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        senderId:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        editedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+        attachment:
+          $ref: '#/components/schemas/MessagingAttachment'
+
+    InspectionCategory:
+      type: string
+      enum: [structural, plumbing, electrical, safety, exterior]
+
+    InspectionResult:
+      type: string
+      enum: [pass, fail, na]
+
+    PropertyInspectionStatus:
+      type: string
+      enum: [pending, in_progress, submitted, approved, rejected]
+
+    PropertyInspection:
+      type: object
+      required: [id, listingId, inspectorId, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        listingId:
+          type: string
+          format: uuid
+        inspectorId:
+          type: string
+          description: Assigned inspector (the verified inspector who created the inspection)
+        status:
+          $ref: '#/components/schemas/PropertyInspectionStatus'
+        scheduledAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+        inspectorNotes:
+          type: string
+        rejectionReason:
+          type: string
+        reviewedBy:
+          type: string
+        reviewedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PropertyInspectionEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/PropertyInspection'
+
+    InspectionChecklistItem:
+      type: object
+      required: [id, inspectionId, category, item, result]
+      properties:
+        id:
+          type: string
+          format: uuid
+        inspectionId:
+          type: string
+          format: uuid
+        category:
+          $ref: '#/components/schemas/InspectionCategory'
+        item:
+          type: string
+        result:
+          $ref: '#/components/schemas/InspectionResult'
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    InspectionPhoto:
+      type: object
+      required: [id, inspectionId, url]
+      properties:
+        id:
+          type: string
+          format: uuid
+        inspectionId:
+          type: string
+          format: uuid
+        url:
+          type: string
+          description: Storage object key issued by the presign endpoint
+        caption:
+          type: string
+        takenAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    ListingInspectionSummary:
+      type: object
+      required: [listingId, inspectionId, trustScore, hasVerifiedInspection, categories, items, photoCount]
+      properties:
+        listingId:
+          type: string
+          format: uuid
+        inspectionId:
+          type: string
+          format: uuid
+        submittedAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+        trustScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        hasVerifiedInspection:
+          type: boolean
+        categories:
+          type: array
+          items:
+            type: object
+            required: [category, pass, fail, na]
+            properties:
+              category:
+                $ref: '#/components/schemas/InspectionCategory'
+              pass:
+                type: integer
+              fail:
+                type: integer
+              na:
+                type: integer
+        items:
+          type: array
+          items:
+            type: object
+            required: [category, item, result]
+            properties:
+              category:
+                $ref: '#/components/schemas/InspectionCategory'
+              item:
+                type: string
+              result:
+                $ref: '#/components/schemas/InspectionResult'
+        photoCount:
+          type: integer
+
     User:
       type: object
       required:
@@ -5569,174 +8282,295 @@ components:
             delegatee: { type: string }
             amountUsdc: { type: string }
 
-    GovernanceProposalStatus:
-      type: string
-      description: Mirrors ProposalStatus in contracts/governance/src/lib.rs.
-      enum:
-        - Active
-        - Passed
-        - Rejected
-        - Executed
-        - Cancelled
-
-    GovernanceProposal:
+    ActiveSession:
       type: object
-      description: |
-        Mirrors the Proposal struct in contracts/governance/src/lib.rs. i128 fields are
-        decimal strings so values beyond Number.MAX_SAFE_INTEGER keep full precision.
       required:
         - id
-        - proposer
-        - paramKey
-        - currentValue
-        - proposedValue
-        - votesFor
-        - votesAgainst
-        - status
         - createdAt
-        - votingEndsAt
-        - snapshottedTotalStaked
+        - lastActiveAt
+        - expiresAt
+        - current
       properties:
         id:
-          type: integer
-          example: 1
-        proposer:
           type: string
-          description: Stellar address of the proposer
-          example: "GABCDEXAMPLE0000000000000000000000000000000000000000000000AB"
-        paramKey:
+          format: uuid
+        family:
           type: string
-          description: Arbitrary Soroban symbol chosen by the proposer; opaque to the contract and this API.
-          example: "min_stake"
-        currentValue:
-          type: string
-          description: i128 as a decimal string
-          example: "100"
-        proposedValue:
-          type: string
-          description: i128 as a decimal string
-          example: "200"
-        votesFor:
-          type: string
-          example: "600000"
-        votesAgainst:
-          type: string
-          example: "200000"
-        status:
-          $ref: '#/components/schemas/GovernanceProposalStatus'
+          nullable: true
+          description: Refresh-token family (one per device login chain)
         createdAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        current:
+          type: boolean
+          description: True for the session making this request
+
+    RevokedSessions:
+      type: object
+      required:
+        - revoked
+      properties:
+        revoked:
           type: integer
-          description: Ledger timestamp (unix seconds)
-          example: 1735689600
-        votingEndsAt:
+          description: Number of sessions revoked
+
+    PartnerApplicationStatus:
+      type: string
+      enum:
+        - pending
+        - contacted
+        - approved
+        - rejected
+
+    PartnerLandlordApplicationInput:
+      type: object
+      required:
+        - fullName
+        - phone
+        - email
+        - propertyCount
+      properties:
+        fullName:
+          type: string
+          minLength: 2
+          maxLength: 100
+        phone:
+          type: string
+          description: Nigerian mobile number
+          example: '08031234567'
+        email:
+          type: string
+          format: email
+        propertyCount:
           type: integer
-          example: 1736294400
-        snapshottedTotalStaked:
+          minimum: 1
+        propertyLocations:
           type: string
-          description: Total staked snapshotted at proposal creation, used for quorum
-          example: "1000000"
+          maxLength: 1000
 
-    GovernanceProposalListResponse:
+    PartnerLandlordApplication:
       type: object
       required:
-        - success
-        - proposals
-        - count
+        - id
+        - fullName
+        - phone
+        - email
+        - propertyCount
+        - propertyLocations
+        - status
+        - createdAt
+        - updatedAt
       properties:
-        success:
-          type: boolean
-          example: true
-        proposals:
-          type: array
-          items:
-            $ref: '#/components/schemas/GovernanceProposal'
-        count:
+        id:
+          type: string
+        fullName:
+          type: string
+        phone:
+          type: string
+          example: '+2348031234567'
+        email:
+          type: string
+          format: email
+        propertyCount:
           type: integer
-          example: 1
-
-    GovernanceProposalResponse:
-      type: object
-      required:
-        - success
-        - proposal
-      properties:
-        success:
-          type: boolean
-          example: true
-        proposal:
-          $ref: '#/components/schemas/GovernanceProposal'
-
-    PrepareGovernanceProposalRequest:
-      type: object
-      required:
-        - paramKey
-        - currentValue
-        - proposedValue
-      properties:
-        paramKey:
+        propertyLocations:
           type: string
-          pattern: '^[A-Za-z0-9_]{1,32}$'
-          description: Soroban symbol (max 32 chars of [A-Za-z0-9_])
-          example: "min_stake"
-        currentValue:
-          oneOf:
-            - type: string
-            - type: integer
-          example: "100"
-        proposedValue:
-          oneOf:
-            - type: string
-            - type: integer
-          example: "200"
-
-    GovernanceVoteRequest:
-      type: object
-      required:
-        - support
-      properties:
-        support:
-          type: boolean
-          description: true = vote for, false = vote against
-          example: true
-
-    SubmitSignedTransactionRequest:
-      type: object
-      required:
-        - signedXdr
-      properties:
-        signedXdr:
+        status:
+          $ref: '#/components/schemas/PartnerApplicationStatus'
+        reviewedBy:
           type: string
-          description: Base64 transaction envelope signed by the caller's connected wallet
-      example:
-        signedXdr: "AAAAAgAAAAA..."
+          nullable: true
+          description: User id of the reviewing admin
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
-    UnsignedTransactionResponse:
+    RentGuaranteePolicyStatus:
+      type: string
+      enum:
+        - quoted
+        - active
+        - cancelled
+        - claimed
+
+    RentGuaranteePolicy:
       type: object
       required:
-        - success
-        - xdr
+        - id
+        - dealId
+        - provider
+        - policyNumber
+        - premiumNgn
+        - coverageTermMonths
+        - status
+        - createdAt
+        - updatedAt
       properties:
-        success:
-          type: boolean
-          example: true
-        xdr:
+        id:
           type: string
-          description: Base64 unsigned transaction envelope for the caller's wallet to sign
+          format: uuid
+        dealId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          example: mock
+        policyNumber:
+          type: string
+        premiumNgn:
+          type: number
+        coverageTermMonths:
+          type: integer
+        status:
+          $ref: '#/components/schemas/RentGuaranteePolicyStatus'
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancellationReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
-    GovernanceTxResponse:
+    RentGuaranteePolicyResponse:
       type: object
       required:
-        - success
-        - txHash
+        - policy
       properties:
-        success:
-          type: boolean
-          example: true
-        txHash:
+        policy:
+          $ref: '#/components/schemas/RentGuaranteePolicy'
+
+    RentGuaranteeClaim:
+      type: object
+      required:
+        - id
+        - policyId
+        - amountNgn
+        - reason
+        - status
+        - createdAt
+      properties:
+        id:
           type: string
-          example: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+          format: uuid
+        policyId:
+          type: string
+          format: uuid
+        amountNgn:
+          type: number
+        reason:
+          type: string
+        status:
+          type: string
+          enum:
+            - submitted
+            - approved
+            - rejected
+            - paid
+        createdAt:
+          type: string
+          format: date-time
 
   responses:
+    Forbidden:
+      description: Caller lacks the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: "FORBIDDEN"
+              message: "Forbidden"
+
+    NotFound:
+      description: Resource not found (also returned for resources owned by someone else)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: "NOT_FOUND"
+              message: "Not found"
+
+    Conflict:
+      description: Request conflicts with current state (duplicate submission or invalid status transition)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: "INVALID_STATE_TRANSITION"
+              message: "Cannot bind a policy that is cancelled"
+
+    InspectionForbidden:
+      description: Caller lacks the required permission, is not a verified inspector, or is not the assigned inspector
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: "FORBIDDEN"
+              message: "Only verified inspectors can perform this action"
+
+    InspectionNotFound:
+      description: Inspection or listing not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: "NOT_FOUND"
+              message: "Inspection not found"
+
+    InspectionInvalidTransition:
+      description: The inspection's current status does not allow this action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: "INVALID_STATE_TRANSITION"
+              message: "Cannot submit an inspection with status 'pending'"
+              details:
+                status: pending
+
     Error:
       description: Unexpected error
       content:
@@ -5864,5 +8698,15 @@ tags:
     description: Staking operations (stake, unstake, claim rewards)
   - name: Support
     description: Public support/contact message intake
+  - name: Erasure
+    description: Account erasure (NDPA/GDPR right-to-erasure) requests and admin review
+  - name: Messaging
+    description: Conversations, messages and message attachments (presigned uploads/downloads)
+  - name: Inspections
+    description: Property inspections (checklist + photos) feeding the listing trust score, and inspector verification
+  - name: Landlord
+    description: Partner landlord applications and landlord-facing operations
+  - name: Rent Guarantee
+    description: Landlord rent guarantee insurance - quotes, policy binding and claims
   - name: Governance
     description: Stake-weighted parameter governance proposals and voting (contracts/governance)

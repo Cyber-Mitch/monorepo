@@ -1,277 +1,204 @@
-import { randomUUID } from 'node:crypto'
-import { getPool, type PgPoolLike } from '../db.js'
-import {
-  InspectorProfile,
-  InspectorVerificationStatus,
-  CreateInspectorProfileInput,
-  UpdateInspectorProfileInput,
-} from './inspectorProfile.js'
+/**
+ * Inspector Profile Store
+ *
+ * Reads and writes `inspector_profiles` (migrations/040). Used by:
+ *   - the inspector onboarding routes (#1902): self-service bio and service areas
+ *   - the admin verify / suspend routes (#1902), which set verification_status
+ *   - requireVerifiedInspector (#1904): gates inspection work on 'verified'
+ */
 
-interface InspectorProfileStorePort {
-  create(input: CreateInspectorProfileInput): Promise<InspectorProfile>
-  getByUserId(userId: string): Promise<InspectorProfile | null>
-  update(userId: string, input: UpdateInspectorProfileInput): Promise<InspectorProfile | null>
-  updateVerificationStatus(userId: string, status: InspectorVerificationStatus): Promise<InspectorProfile | null>
-  incrementCompletedInspections(userId: string): Promise<InspectorProfile | null>
-  listVerified(): Promise<InspectorProfile[]>
-  clear(): Promise<void>
+import { getPool } from '../db.js'
+
+export type InspectorVerificationStatus = 'pending' | 'verified' | 'suspended'
+
+export interface InspectorProfile {
+  userId: string
+  verificationStatus: InspectorVerificationStatus
+  bio: string | null
+  serviceAreas: string[]
+  completedInspections: number
+  createdAt: Date
+  updatedAt: Date
 }
 
-class InMemoryInspectorProfileStore implements InspectorProfileStorePort {
-  private profiles = new Map<string, InspectorProfile>()
+export interface InspectorOnboardingData {
+  bio: string
+  serviceAreas: string[]
+}
 
-  async create(input: CreateInspectorProfileInput): Promise<InspectorProfile> {
-    const now = new Date()
-    const profile: InspectorProfile = {
-      userId: input.userId,
-      verificationStatus: InspectorVerificationStatus.PENDING,
-      bio: input.bio,
-      serviceAreas: input.serviceAreas,
-      completedInspections: 0,
-      createdAt: now,
-      updatedAt: now,
-    }
+export interface InspectorProfileStore {
+  getByUserId(userId: string): Promise<InspectorProfile | null>
+  listByStatus(status?: InspectorVerificationStatus): Promise<InspectorProfile[]>
+  /** Creates or updates the profile's self-service fields and sets it to 'pending'. */
+  submitOnboarding(userId: string, data: InspectorOnboardingData): Promise<InspectorProfile>
+  setVerificationStatus(
+    userId: string,
+    status: InspectorVerificationStatus,
+  ): Promise<InspectorProfile>
+}
 
-    this.profiles.set(input.userId, profile)
-    return profile
+function blankProfile(userId: string, status: InspectorVerificationStatus): InspectorProfile {
+  const now = new Date()
+  return {
+    userId,
+    verificationStatus: status,
+    bio: null,
+    serviceAreas: [],
+    completedInspections: 0,
+    createdAt: now,
+    updatedAt: now,
   }
+}
+
+/**
+ * In-memory implementation for testing
+ */
+export class InMemoryInspectorProfileStore implements InspectorProfileStore {
+  private profiles: Map<string, InspectorProfile> = new Map()
 
   async getByUserId(userId: string): Promise<InspectorProfile | null> {
-    return this.profiles.get(userId) ?? null
-  }
-
-  async update(userId: string, input: UpdateInspectorProfileInput): Promise<InspectorProfile | null> {
     const profile = this.profiles.get(userId)
-    if (!profile) return null
+    return profile ? { ...profile, serviceAreas: [...profile.serviceAreas] } : null
+  }
 
-    if (input.bio !== undefined) profile.bio = input.bio
-    if (input.serviceAreas !== undefined) profile.serviceAreas = input.serviceAreas
-    profile.updatedAt = new Date()
+  async listByStatus(status?: InspectorVerificationStatus): Promise<InspectorProfile[]> {
+    return Array.from(this.profiles.values())
+      .filter((profile) => !status || profile.verificationStatus === status)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((profile) => ({ ...profile, serviceAreas: [...profile.serviceAreas] }))
+  }
 
+  async submitOnboarding(
+    userId: string,
+    data: InspectorOnboardingData,
+  ): Promise<InspectorProfile> {
+    const existing = this.profiles.get(userId)
+    const profile: InspectorProfile = {
+      ...(existing ?? blankProfile(userId, 'pending')),
+      verificationStatus: 'pending',
+      bio: data.bio,
+      serviceAreas: [...data.serviceAreas],
+      updatedAt: new Date(),
+    }
     this.profiles.set(userId, profile)
-    return profile
+    return { ...profile, serviceAreas: [...profile.serviceAreas] }
   }
 
-  async updateVerificationStatus(userId: string, status: InspectorVerificationStatus): Promise<InspectorProfile | null> {
-    const profile = this.profiles.get(userId)
-    if (!profile) return null
-
-    profile.verificationStatus = status
-    profile.updatedAt = new Date()
-
+  async setVerificationStatus(
+    userId: string,
+    status: InspectorVerificationStatus,
+  ): Promise<InspectorProfile> {
+    const existing = this.profiles.get(userId)
+    const profile: InspectorProfile = {
+      ...(existing ?? blankProfile(userId, status)),
+      verificationStatus: status,
+      updatedAt: new Date(),
+    }
     this.profiles.set(userId, profile)
-    return profile
+    return { ...profile, serviceAreas: [...profile.serviceAreas] }
   }
 
-  async incrementCompletedInspections(userId: string): Promise<InspectorProfile | null> {
-    const profile = this.profiles.get(userId)
-    if (!profile) return null
-
-    profile.completedInspections += 1
-    profile.updatedAt = new Date()
-
-    this.profiles.set(userId, profile)
-    return profile
-  }
-
-  async listVerified(): Promise<InspectorProfile[]> {
-    return Array.from(this.profiles.values()).filter(
-      (p) => p.verificationStatus === InspectorVerificationStatus.VERIFIED,
-    )
-  }
-
+  // Test helper
   async clear(): Promise<void> {
     this.profiles.clear()
   }
 }
 
-type InspectorProfileRow = {
-  user_id: string
-  verification_status: string
-  bio: string | null
-  service_areas: unknown
-  completed_inspections: number
-  created_at: Date
-  updated_at: Date
-}
+const PROFILE_COLUMNS = `user_id, verification_status, bio, service_areas,
+       completed_inspections, created_at, updated_at`
 
-class PostgresInspectorProfileStore implements InspectorProfileStorePort {
-  private async pool(): Promise<PgPoolLike> {
-    const pool = await getPool()
-    if (!pool) {
-      throw new Error('Database pool is not available (DATABASE_URL/pg not configured)')
-    }
-    return pool
-  }
-
-  async isAvailable(): Promise<boolean> {
-    return (await getPool()) !== null
-  }
-
-  async create(input: CreateInspectorProfileInput): Promise<InspectorProfile> {
-    const pool = await this.pool()
-    const { rows } = await pool.query(
-      `INSERT INTO inspector_profiles (user_id, verification_status, bio, service_areas)
-       VALUES ($1, $2, $3, $4::jsonb)
-       RETURNING *`,
-      [input.userId, InspectorVerificationStatus.PENDING, input.bio ?? null, JSON.stringify(input.serviceAreas)],
-    )
-
-    return this.mapRow(rows[0] as InspectorProfileRow)
-  }
-
+/**
+ * PostgreSQL implementation
+ */
+export class PostgresInspectorProfileStore implements InspectorProfileStore {
   async getByUserId(userId: string): Promise<InspectorProfile | null> {
-    const pool = await this.pool()
-    const { rows } = await pool.query(
-      'SELECT * FROM inspector_profiles WHERE user_id = $1',
+    const pool = await getPool()
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = await pool.query(
+      `SELECT ${PROFILE_COLUMNS}
+       FROM inspector_profiles
+       WHERE user_id = $1`,
       [userId],
     )
-
-    if (rows.length === 0) return null
-    return this.mapRow(rows[0] as InspectorProfileRow)
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null
   }
 
-  async update(userId: string, input: UpdateInspectorProfileInput): Promise<InspectorProfile | null> {
-    const pool = await this.pool()
-    const updates: string[] = []
-    const values: unknown[] = []
-    let paramIndex = 1
+  async listByStatus(status?: InspectorVerificationStatus): Promise<InspectorProfile[]> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = status
+      ? await pool.query(
+          `SELECT ${PROFILE_COLUMNS}
+           FROM inspector_profiles
+           WHERE verification_status = $1
+           ORDER BY created_at ASC`,
+          [status],
+        )
+      : await pool.query(
+          `SELECT ${PROFILE_COLUMNS}
+           FROM inspector_profiles
+           ORDER BY created_at ASC`,
+        )
+    return result.rows.map((row: any) => this.mapRow(row))
+  }
 
-    if (input.bio !== undefined) {
-      updates.push(`bio = $${paramIndex++}`)
-      values.push(input.bio)
-    }
-
-    if (input.serviceAreas !== undefined) {
-      updates.push(`service_areas = $${paramIndex++}`)
-      values.push(JSON.stringify(input.serviceAreas))
-    }
-
-    if (updates.length === 0) return this.getByUserId(userId)
-
-    updates.push(`updated_at = NOW()`)
-    values.push(userId)
-
-    const { rows } = await pool.query(
-      `UPDATE inspector_profiles SET ${updates.join(', ')} WHERE user_id = $${paramIndex} RETURNING *`,
-      values,
+  async submitOnboarding(
+    userId: string,
+    data: InspectorOnboardingData,
+  ): Promise<InspectorProfile> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = await pool.query(
+      `INSERT INTO inspector_profiles (user_id, verification_status, bio, service_areas)
+       VALUES ($1, 'pending', $2, $3::jsonb)
+       ON CONFLICT (user_id) DO UPDATE
+         SET verification_status = 'pending',
+             bio = EXCLUDED.bio,
+             service_areas = EXCLUDED.service_areas,
+             updated_at = NOW()
+       RETURNING ${PROFILE_COLUMNS}`,
+      [userId, data.bio, JSON.stringify(data.serviceAreas)],
     )
-
-    if (rows.length === 0) return null
-    return this.mapRow(rows[0] as InspectorProfileRow)
+    return this.mapRow(result.rows[0])
   }
 
-  async updateVerificationStatus(userId: string, status: InspectorVerificationStatus): Promise<InspectorProfile | null> {
-    const pool = await this.pool()
-    const { rows } = await pool.query(
-      `UPDATE inspector_profiles
-       SET verification_status = $2, updated_at = NOW()
-       WHERE user_id = $1
-       RETURNING *`,
+  async setVerificationStatus(
+    userId: string,
+    status: InspectorVerificationStatus,
+  ): Promise<InspectorProfile> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = await pool.query(
+      `INSERT INTO inspector_profiles (user_id, verification_status)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE
+         SET verification_status = EXCLUDED.verification_status,
+             updated_at = NOW()
+       RETURNING ${PROFILE_COLUMNS}`,
       [userId, status],
     )
-
-    if (rows.length === 0) return null
-    return this.mapRow(rows[0] as InspectorProfileRow)
+    return this.mapRow(result.rows[0])
   }
 
-  async incrementCompletedInspections(userId: string): Promise<InspectorProfile | null> {
-    const pool = await this.pool()
-    const { rows } = await pool.query(
-      `UPDATE inspector_profiles
-       SET completed_inspections = completed_inspections + 1, updated_at = NOW()
-       WHERE user_id = $1
-       RETURNING *`,
-      [userId],
-    )
-
-    if (rows.length === 0) return null
-    return this.mapRow(rows[0] as InspectorProfileRow)
-  }
-
-  async listVerified(): Promise<InspectorProfile[]> {
-    const pool = await this.pool()
-    const { rows } = await pool.query(
-      `SELECT * FROM inspector_profiles WHERE verification_status = $1`,
-      [InspectorVerificationStatus.VERIFIED],
-    )
-
-    return rows.map((row) => this.mapRow(row as InspectorProfileRow))
-  }
-
-  async clear(): Promise<void> {
-    const pool = await this.pool()
-    if (process.env.NODE_ENV !== 'test') {
-      throw new Error('inspectorProfileStore.clear() is only supported in test env when using Postgres')
-    }
-    await pool.query('TRUNCATE inspector_profiles RESTART IDENTITY CASCADE')
-  }
-
-  private mapRow(row: InspectorProfileRow): InspectorProfile {
-    const serviceAreasValue = row.service_areas
-    const serviceAreas = Array.isArray(serviceAreasValue)
-      ? (serviceAreasValue as string[])
-      : typeof serviceAreasValue === 'string'
-        ? (JSON.parse(serviceAreasValue) as string[])
-        : []
-
+  private mapRow(row: any): InspectorProfile {
     return {
       userId: row.user_id,
-      verificationStatus: row.verification_status as InspectorVerificationStatus,
-      bio: row.bio ?? undefined,
-      serviceAreas,
-      completedInspections: row.completed_inspections,
+      verificationStatus: row.verification_status,
+      bio: row.bio ?? null,
+      serviceAreas: Array.isArray(row.service_areas) ? row.service_areas : [],
+      completedInspections: Number(row.completed_inspections ?? 0),
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     }
   }
 }
 
-class HybridInspectorProfileStore implements InspectorProfileStorePort {
-  private memory = new InMemoryInspectorProfileStore()
-  private postgres = new PostgresInspectorProfileStore()
+// Singleton instance
+let inspectorProfileStore: InspectorProfileStore =
+  new InMemoryInspectorProfileStore()
 
-  private async adapter(): Promise<InspectorProfileStorePort> {
-    if (await this.postgres.isAvailable()) {
-      return this.postgres
-    }
-    return this.memory
-  }
-
-  async create(input: CreateInspectorProfileInput): Promise<InspectorProfile> {
-    const adapter = await this.adapter()
-    return adapter.create(input)
-  }
-
-  async getByUserId(userId: string): Promise<InspectorProfile | null> {
-    const adapter = await this.adapter()
-    return adapter.getByUserId(userId)
-  }
-
-  async update(userId: string, input: UpdateInspectorProfileInput): Promise<InspectorProfile | null> {
-    const adapter = await this.adapter()
-    return adapter.update(userId, input)
-  }
-
-  async updateVerificationStatus(userId: string, status: InspectorVerificationStatus): Promise<InspectorProfile | null> {
-    const adapter = await this.adapter()
-    return adapter.updateVerificationStatus(userId, status)
-  }
-
-  async incrementCompletedInspections(userId: string): Promise<InspectorProfile | null> {
-    const adapter = await this.adapter()
-    return adapter.incrementCompletedInspections(userId)
-  }
-
-  async listVerified(): Promise<InspectorProfile[]> {
-    const adapter = await this.adapter()
-    return adapter.listVerified()
-  }
-
-  async clear(): Promise<void> {
-    const adapter = await this.adapter()
-    return adapter.clear()
-  }
+export function initInspectorProfileStore(store: InspectorProfileStore): void {
+  inspectorProfileStore = store
 }
 
-export const inspectorProfileStore = new HybridInspectorProfileStore()
+export { inspectorProfileStore }

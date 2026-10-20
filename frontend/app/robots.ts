@@ -23,9 +23,7 @@ export default function robots(): MetadataRoute.Robots {
           "/admin/",
           "/dashboard/",
           "/wallet",
-          "/messages",
           "/onboarding",
-          "/pre-screen",
           "/report",
           "/staking",
           "/tenant/",
@@ -34,10 +32,6 @@ export default function robots(): MetadataRoute.Robots {
           "/offline",
           "/whistleblower/dashboard",
           "/whistleblower/earnings",
-          // Token-addressed rating cards: the link is the access control, so
-          // these must never be fetched, cached, or indexed.
-          "/rating-card/",
-          "/public/tenant-rating/",
         ],
       },
     ],

@@ -1,6 +1,7 @@
 import { getPool } from '../db.js'
 import { logger } from '../utils/logger.js'
 import { erasureService } from '../services/erasureService.js'
+import { expireTenantDataExports } from '../services/tenantDataExportService.js'
 import { observeJobRun, sumCounts } from './jobObservability.js'
 
 export interface DataRetentionResult {
@@ -8,6 +9,8 @@ export interface DataRetentionResult {
   kycRejectionsAnonymised: number
   supportMessagesDeleted: number
   erasureRequestsExpired: number
+  /** Tenant data-export archives deleted after their 7-day window (#1899). */
+  dataExportsExpired: number
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -61,6 +64,7 @@ export class DataRetentionJob {
       kycRejectionsAnonymised: 0,
       supportMessagesDeleted: 0,
       erasureRequestsExpired: 0,
+      dataExportsExpired: 0,
     }
 
     try {
@@ -103,6 +107,7 @@ export class DataRetentionJob {
       result.supportMessagesDeleted = support.rowCount ?? 0
 
       result.erasureRequestsExpired = await erasureService.expireOverdueRequests(now)
+      result.dataExportsExpired = await expireTenantDataExports(now)
 
       logger.info('DataRetentionJob completed', { ...result, durationMs: Date.now() - started })
     } catch (error) {

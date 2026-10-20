@@ -1,68 +1,41 @@
-import type { ScoreBand } from "@/lib/creditScoreApi";
+"use client";
 
-type CreditScoreGaugeProps = {
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import type { CreditScoreBand } from "@/lib/creditScoreApi";
+
+interface CreditScoreGaugeProps {
   score: number;
-  band: ScoreBand;
-};
+  band: CreditScoreBand;
+  computedAt: string;
+}
 
-const BAND_COLORS: Record<ScoreBand, string> = {
-  Poor: "#ef4444",
-  Fair: "#f59e0b",
-  Good: "#22c55e",
-  Excellent: "#16a34a",
-};
-
-export function CreditScoreGauge({ score, band }: CreditScoreGaugeProps) {
-  const clampedScore = Math.min(100, Math.max(0, score));
-  const circumference = 2 * Math.PI * 54;
-  const offset = circumference - (clampedScore / 100) * circumference;
-  const color = BAND_COLORS[band];
+export function CreditScoreGauge({ score, band, computedAt }: CreditScoreGaugeProps) {
+  const getBandColor = (band: CreditScoreBand) => {
+    if (band === "excellent") return "bg-green-100 text-green-800 border-green-500";
+    if (band === "good") return "bg-blue-100 text-blue-800 border-blue-500";
+    if (band === "fair") return "bg-yellow-100 text-yellow-800 border-yellow-500";
+    return "bg-red-100 text-red-800 border-red-500";
+  };
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative h-40 w-40 md:h-48 md:w-48">
-        <svg
-          viewBox="0 0 120 120"
-          className="h-full w-full -rotate-90"
-          aria-hidden="true"
-        >
-          <circle
-            cx="60"
-            cy="60"
-            r="54"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="10"
-            className="text-muted"
-          />
-          <circle
-            cx="60"
-            cy="60"
-            r="54"
-            fill="none"
-            stroke={color}
-            strokeWidth="10"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            className="transition-all duration-700"
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="font-mono text-4xl font-black md:text-5xl">
-            {clampedScore}
-          </span>
-          <span
-            className="mt-1 font-mono text-sm font-bold uppercase tracking-wide"
-            style={{ color }}
-          >
-            {band}
-          </span>
+    <Card className="border-3 border-foreground shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
+      <CardHeader>
+        <CardTitle className="text-xl font-black">Credit Score</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col items-center justify-center py-8">
+        <div className="relative mb-6">
+          <div className="flex h-32 w-32 items-center justify-center rounded-full border-[12px] border-muted">
+            <span className="text-4xl font-black">{score}</span>
+          </div>
         </div>
-      </div>
-      <p className="mt-4 text-center text-sm text-muted-foreground">
-        Your tenant risk score (0–100)
-      </p>
-    </div>
+        <Badge variant="outline" className={`mb-3 border-2 px-4 py-1 text-lg font-black capitalize ${getBandColor(band)}`}>
+          {band}
+        </Badge>
+        <p className="text-sm text-muted-foreground">
+          Last computed: {new Date(computedAt).toLocaleString()}
+        </p>
+      </CardContent>
+    </Card>
   );
 }

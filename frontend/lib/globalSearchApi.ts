@@ -3,7 +3,7 @@ import { apiGet, withQuery } from "@/lib/apiClient"
 
 export interface SearchResult {
   id: string
-  type: "property" | "deal" | "document" | "transaction" | "conversation"
+  type: "property" | "deal" | "document" | "transaction"
   title: string
   subtitle: string
   href: string
@@ -52,27 +52,6 @@ async function searchDealsApi(query: string): Promise<SearchResult[]> {
   }
 }
 
-async function searchDocumentsApi(query: string): Promise<SearchResult[]> {
-  try {
-    const path = withQuery("/api/tenant/vault", {
-      search: query,
-      pageSize: 5,
-    })
-    const res = await apiGet<{
-      data?: Array<{ id: string; fileName: string; category: string }>
-    }>(path)
-    return (res.data ?? []).map((d) => ({
-      id: d.id,
-      type: "document" as const,
-      title: d.fileName,
-      subtitle: d.category,
-      href: `/documents/${d.id}`,
-    }))
-  } catch {
-    return []
-  }
-}
-
 async function searchTransactionsApi(query: string): Promise<SearchResult[]> {
   try {
     const path = withQuery("/api/transactions/search", {
@@ -94,27 +73,6 @@ async function searchTransactionsApi(query: string): Promise<SearchResult[]> {
   }
 }
 
-async function searchConversationsApi(query: string): Promise<SearchResult[]> {
-  try {
-    const path = withQuery("/api/conversations/search", {
-      q: query,
-      pageSize: 5,
-    })
-    const res = await apiGet<{
-      data?: Array<{ id: string; name: string; lastMessage?: string }>
-    }>(path)
-    return (res.data ?? []).map((c) => ({
-      id: c.id,
-      type: "conversation" as const,
-      title: c.name ?? "Conversation",
-      subtitle: c.lastMessage ?? "",
-      href: `/messages/${c.id}`,
-    }))
-  } catch {
-    return []
-  }
-}
-
 export async function globalSearch(
   query: string,
   isAuthenticated: boolean,
@@ -129,18 +87,13 @@ export async function globalSearch(
   }
 
   if (isAuthenticated) {
-    const [deals, documents, transactions, conversations] = await Promise.all([
+    const [deals, transactions] = await Promise.all([
       searchDealsApi(query),
-      searchDocumentsApi(query),
       searchTransactionsApi(query),
-      searchConversationsApi(query),
     ])
 
     if (deals.length > 0) groups.push({ label: "Deals", results: deals })
-    if (documents.length > 0) groups.push({ label: "Documents", results: documents })
     if (transactions.length > 0) groups.push({ label: "Transactions", results: transactions })
-    if (conversations.length > 0)
-      groups.push({ label: "Conversations", results: conversations })
   }
 
   return groups

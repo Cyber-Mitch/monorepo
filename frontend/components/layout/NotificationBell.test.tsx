@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationBell } from './NotificationBell'
 
 const mockUseNotifications = vi.fn()
-const mockUseUnreadMessageCount = vi.fn()
 const mockMarkAllNotificationsRead = vi.fn()
 const mockIsAuthenticated = vi.fn()
 
@@ -18,10 +17,6 @@ vi.mock('next/link', () => ({
 
 vi.mock('@/hooks/useNotifications', () => ({
   useNotifications: () => mockUseNotifications(),
-}))
-
-vi.mock('@/hooks/useUnreadMessageCount', () => ({
-  useUnreadMessageCount: () => mockUseUnreadMessageCount(),
 }))
 
 vi.mock('@/lib/notificationsApi', () => ({
@@ -40,7 +35,6 @@ describe('NotificationBell', () => {
       notifications: [{ id: 'n1', category: 'payment_due', title: 'Payment due', body: 'Your rent is due', createdAt: new Date().toISOString(), read: false }],
       isConnected: true,
     })
-    mockUseUnreadMessageCount.mockReturnValue({ unreadCount: 1, isConnected: true })
     mockMarkAllNotificationsRead.mockResolvedValue(undefined)
   })
 
@@ -52,15 +46,14 @@ describe('NotificationBell', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows the combined unread count and opens the notification menu', () => {
+  it('shows the unread count and opens the notification menu', () => {
     render(<NotificationBell />)
 
-    const trigger = screen.getByRole('button', { name: /Notifications, 2 unread notifications and 1 unread messages/i })
-    expect(trigger).toHaveTextContent('3')
+    const trigger = screen.getByRole('button', { name: /Notifications, 2 unread notifications/i })
+    expect(trigger).toHaveTextContent('2')
 
     fireEvent.click(trigger)
 
-    expect(screen.getByText('Messages')).toBeInTheDocument()
     expect(screen.getByText('Payment due')).toBeInTheDocument()
   })
 })

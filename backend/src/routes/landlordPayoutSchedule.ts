@@ -1,153 +1,167 @@
 /**
- * Landlord Payout Schedule Routes
- * Handles schedule timeline, listing, and drill-down for landlord payouts
+ * Landlord payout schedule routes — issue #1892. Landlord-only; every query is
+ * scoped to the authenticated landlord.
+ *
+ *   GET /api/v1/landlord/payout-schedule                  periods + summary
+ *   GET /api/v1/landlord/payout-schedule/payouts          paginated payout list
+ *   GET /api/v1/landlord/payout-schedule/preference       schedule preference
+ *   PUT /api/v1/landlord/payout-schedule/preference       update preference
+ *   GET /api/v1/landlord/payout-schedule/:payoutId        payout detail (404 if not theirs)
+ *
+ * Filters: propertyId, status, channel, from, to (ISO datetimes).
+ * Creating payouts (settlement) is out of scope.
  */
 
-import { Router, type Request, type Response, type NextFunction } from 'express'
-import { authenticateToken } from '../middleware/auth.js'
+import { Router, type Response, type NextFunction } from 'express'
+import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
+import { validate } from '../middleware/validate.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { listPayoutScheduleSchema } from '../schemas/landlordPayoutSchedule.js'
-import { getLandlordPayoutScheduleStore } from '../models/landlordPayoutScheduleStore.js'
+import {
+  landlordPayoutScheduleStore,
+  type LandlordPayoutFilters,
+} from '../models/landlordPayoutScheduleStore.js'
+import {
+  listPayoutScheduleSchema,
+  payoutScheduleIdParamsSchema,
+  updatePayoutSchedulePreferenceSchema,
+  type ListPayoutScheduleRequest,
+  type UpdatePayoutSchedulePreferenceRequest,
+} from '../schemas/landlordPayoutSchedule.js'
+import { groupPayoutsIntoPeriods, summarizePayouts } from '../services/landlordPayoutScheduleGrouping.js'
 
-const router = Router()
-
-function requireLandlord(req: Request): string {
-  const user = (req as any).user
-  if (!user?.id) {
-    throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User not authenticated')
+function requireLandlord(req: AuthenticatedRequest) {
+  if (!req.user) {
+    throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
   }
-  return user.id as string
+  if (req.user.role !== 'landlord') {
+    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only landlords can view payout schedules')
+  }
+  return req.user
 }
 
-/**
- * GET /api/landlord/payout-schedule
- * Returns grouped payout timeline with summary
- */
-router.get(
-  '/',
-  authenticateToken,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const landlordId = requireLandlord(req)
-      const parsed = listPayoutScheduleSchema.safeParse(req.query)
-      if (!parsed.success) {
-        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid query parameters')
-      }
-      const f = parsed.data
-      const store = getLandlordPayoutScheduleStore()
-      const { periods, summary } = await store.getSchedule(landlordId, {
-        propertyId: f.propertyId,
-        status: f.status,
-        channel: f.channel,
-        grouping: f.grouping,
-        from: f.from,
-        to: f.to,
-      })
-      res.json({ success: true, data: { periods, summary } })
-    } catch (error) {
-      if (error instanceof Error && error.name === 'ZodError') {
-        return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))
-      }
-      next(error)
-    }
-  },
-)
-
-/**
- * GET /api/landlord/payout-schedule/payouts
- * Flat list of payouts with pagination and filters
- */
-router.get(
-  '/payouts',
-  authenticateToken,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const landlordId = requireLandlord(req)
-      const parsed = listPayoutScheduleSchema.safeParse(req.query)
-      if (!parsed.success) {
-        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid query parameters')
-      }
-      const f = parsed.data
-      const store = getLandlordPayoutScheduleStore()
-      const result = await store.listPayouts(landlordId, {
-        propertyId: f.propertyId,
-        status: f.status,
-        channel: f.channel,
-        from: f.from,
-        to: f.to,
-        page: f.page,
-        pageSize: f.pageSize,
-      })
-      res.json({
-        success: true,
-        data: result.payouts,
-        pagination: {
-          total: result.total,
-          page: result.page,
-          pageSize: result.pageSize,
-          totalPages: Math.ceil(result.total / result.pageSize),
-        },
-      })
-    } catch (error) {
-      next(error)
-    }
-  },
-)
-
-/**
- * GET /api/landlord/payout-schedule/:payoutId
- * Drill-down: single payout with full deduction and delay details
- */
-router.get(
-  '/:payoutId',
-  authenticateToken,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const landlordId = requireLandlord(req)
-      const { payoutId } = req.params
-      if (!payoutId) {
-        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Payout ID is required')
-      }
-      const store = getLandlordPayoutScheduleStore()
-      const payout = await store.getPayoutById(payoutId, landlordId)
-      if (!payout) {
-        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Payout not found')
-      }
-      res.json({ success: true, data: payout })
-    } catch (error) {
-      next(error)
-    }
-  },
-)
-
-/**
- * PATCH /api/landlord/payout/preferences
- * Save landlord payout schedule preference
- */
-router.patch(
-  '/preferences',
-  authenticateToken,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const landlordId = requireLandlord(req)
-      const { schedule } = req.body ?? {}
-      if (!['activation', 'weekly', 'monthly'].includes(schedule)) {
-        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid schedule preference')
-      }
-      const store = getLandlordPayoutScheduleStore()
-      await store.savePreference(landlordId, schedule)
-      res.json({
-        success: true,
-        preferences: { schedule },
-        message: 'Payout preferences updated successfully',
-      })
-    } catch (error) {
-      next(error)
-    }
-  },
-)
+function filtersFrom(query: ListPayoutScheduleRequest): LandlordPayoutFilters {
+  return {
+    propertyId: query.propertyId,
+    status: query.status,
+    channel: query.channel,
+    from: query.from,
+    to: query.to,
+  }
+}
 
 export function createLandlordPayoutScheduleRouter(): Router {
+  const router = Router()
+
+  router.get(
+    '/',
+    authenticateToken,
+    validate(listPayoutScheduleSchema, 'query'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const user = requireLandlord(req)
+        const query = req.query as unknown as ListPayoutScheduleRequest
+        const payouts = await landlordPayoutScheduleStore.listForLandlord(
+          user.id,
+          filtersFrom(query),
+        )
+        res.json({
+          success: true,
+          data: {
+            periods: groupPayoutsIntoPeriods(payouts, query.grouping),
+            summary: summarizePayouts(payouts),
+          },
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.get(
+    '/payouts',
+    authenticateToken,
+    validate(listPayoutScheduleSchema, 'query'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const user = requireLandlord(req)
+        const query = req.query as unknown as ListPayoutScheduleRequest
+        const { items, total } = await landlordPayoutScheduleStore.listPageForLandlord(
+          user.id,
+          filtersFrom(query),
+          query.page,
+          query.pageSize,
+        )
+        res.json({
+          success: true,
+          data: items,
+          pagination: {
+            total,
+            page: query.page,
+            pageSize: query.pageSize,
+            totalPages: Math.ceil(total / query.pageSize),
+          },
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.get(
+    '/preference',
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const user = requireLandlord(req)
+        const schedulePreference = await landlordPayoutScheduleStore.getPreference(user.id)
+        res.json({ success: true, data: { schedulePreference } })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.put(
+    '/preference',
+    authenticateToken,
+    validate(updatePayoutSchedulePreferenceSchema, 'body'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const user = requireLandlord(req)
+        const body = req.body as UpdatePayoutSchedulePreferenceRequest
+        const schedulePreference = await landlordPayoutScheduleStore.setPreference(
+          user.id,
+          body.schedulePreference,
+        )
+        res.json({ success: true, data: { schedulePreference } })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.get(
+    '/:payoutId',
+    authenticateToken,
+    validate(payoutScheduleIdParamsSchema, 'params'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const user = requireLandlord(req)
+        const payout = await landlordPayoutScheduleStore.findForLandlord(
+          user.id,
+          req.params.payoutId,
+        )
+        // Same response for a foreign payout and a missing one.
+        if (!payout) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, 'Payout not found')
+        }
+        res.json({ success: true, data: payout })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
   return router
 }

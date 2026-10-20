@@ -1,206 +1,288 @@
 /**
- * Landlord Payout Schedule Store
+ * Landlord Payout Schedule Store — issue #1892.
+ *
+ * Reads `landlord_payouts` (migrations/026) and `landlord_payout_preferences`
+ * (migrations/049). Every query is scoped to a landlord id; a payout belonging
+ * to another landlord is indistinguishable from one that does not exist.
  */
 
 import { getPool } from '../db.js'
-import {
-  type LandlordPayout, type PayoutPeriod, type PayoutScheduleSummary,
-  type PayoutStatus, type PayoutChannel, type PayoutGrouping, type Deduction,
+import type {
+  Deduction,
+  DelayReason,
+  LandlordPayout,
+  PayoutChannel,
+  PayoutSchedulePreference,
+  PayoutStatus,
 } from '../schemas/landlordPayoutSchedule.js'
 
+export interface LandlordPayoutFilters {
+  propertyId?: string
+  status?: PayoutStatus
+  channel?: PayoutChannel
+  /** ISO timestamp, inclusive lower bound on scheduledDate. */
+  from?: string
+  /** ISO timestamp, inclusive upper bound on scheduledDate. */
+  to?: string
+}
+
 export interface LandlordPayoutScheduleStore {
-  listPayouts(landlordId: string, filters?: {
-    propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel
-    from?: string; to?: string; page?: number; pageSize?: number
-  }): Promise<{ payouts: LandlordPayout[]; total: number; page: number; pageSize: number }>
-  getPayoutById(payoutId: string, landlordId: string): Promise<LandlordPayout | null>
-  getSchedule(landlordId: string, filters?: {
-    propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel
-    grouping?: PayoutGrouping; from?: string; to?: string
-  }): Promise<{ periods: PayoutPeriod[]; summary: PayoutScheduleSummary }>
-  getPreference(landlordId: string): Promise<string>
-  savePreference(landlordId: string, schedule: string): Promise<string>
+  /** All matching payouts for the landlord, soonest scheduled first. */
+  listForLandlord(landlordId: string, filters?: LandlordPayoutFilters): Promise<LandlordPayout[]>
+  /** One page of matching payouts plus the total count across all pages. */
+  listPageForLandlord(
+    landlordId: string,
+    filters: LandlordPayoutFilters,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: LandlordPayout[]; total: number }>
+  findForLandlord(landlordId: string, payoutId: string): Promise<LandlordPayout | null>
+  getPreference(landlordId: string): Promise<PayoutSchedulePreference>
+  setPreference(
+    landlordId: string,
+    preference: PayoutSchedulePreference,
+  ): Promise<PayoutSchedulePreference>
 }
 
-function getWeekNumber(d: Date): number {
-  const start = new Date(d.getFullYear(), 0, 1)
-  return Math.ceil(((d.getTime() - start.getTime()) / 86400000 + start.getDay() + 1) / 7)
+export const DEFAULT_PAYOUT_SCHEDULE_PREFERENCE: PayoutSchedulePreference = 'monthly'
+
+function toIso(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
-export function groupPayouts(payouts: LandlordPayout[], grouping: PayoutGrouping): PayoutPeriod[] {
-  const map = new Map<string, LandlordPayout[]>()
-  for (const p of payouts) {
-    const d = new Date(p.scheduledDate)
-    const key = grouping === 'weekly'
-      ? `${d.getFullYear()}-W${String(getWeekNumber(d)).padStart(2, '0')}`
-      : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    if (!map.has(key)) map.set(key, [])
-    map.get(key)!.push(p)
-  }
-  const periods: PayoutPeriod[] = []
-  for (const [label, ps] of map) {
-    const sorted = ps.sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime())
-    periods.push({
-      periodLabel: label, periodStart: sorted[0].periodStart,
-      periodEnd: sorted[sorted.length - 1].periodEnd,
-      grossTotal: ps.reduce((s, p) => s + p.grossAmount, 0),
-      deductionsTotal: ps.reduce((s, p) => s + p.deductions.reduce((d, dd) => d + dd.amount, 0), 0),
-      netTotal: ps.reduce((s, p) => s + p.netAmount, 0),
-      payoutCount: ps.length, delayedCount: ps.filter(p => p.status === 'delayed').length, payouts: sorted,
-    })
-  }
-  return periods.sort((a, b) => a.periodLabel.localeCompare(b.periodLabel))
+function matchesFilters(payout: LandlordPayout, filters: LandlordPayoutFilters): boolean {
+  if (filters.propertyId && payout.propertyId !== filters.propertyId) return false
+  if (filters.status && payout.status !== filters.status) return false
+  if (filters.channel && payout.channel !== filters.channel) return false
+  const scheduled = Date.parse(payout.scheduledDate)
+  if (filters.from && scheduled < Date.parse(filters.from)) return false
+  if (filters.to && scheduled > Date.parse(filters.to)) return false
+  return true
 }
 
-export function computeSummary(payouts: LandlordPayout[]): PayoutScheduleSummary {
-  return {
-    totalGross: payouts.reduce((s, p) => s + p.grossAmount, 0),
-    totalDeductions: payouts.reduce((s, p) => s + p.deductions.reduce((d, dd) => d + dd.amount, 0), 0),
-    totalNet: payouts.reduce((s, p) => s + p.netAmount, 0),
-    totalPayouts: payouts.length,
-    delayedPayouts: payouts.filter(p => p.status === 'delayed').length,
-    onHoldPayouts: payouts.filter(p => p.status === 'on_hold').length,
-    currency: payouts[0]?.currency ?? 'NGN',
-  }
-}
-
-function filterPayouts(payouts: LandlordPayout[], landlordId: string, filters?: {
-  propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel; from?: string; to?: string
-}): LandlordPayout[] {
-  let r = payouts.filter(p => p.landlordId === landlordId)
-  if (filters?.propertyId) r = r.filter(p => p.propertyId === filters.propertyId)
-  if (filters?.status) r = r.filter(p => p.status === filters.status)
-  if (filters?.channel) r = r.filter(p => p.channel === filters.channel)
-  if (filters?.from) r = r.filter(p => p.scheduledDate >= filters.from!)
-  if (filters?.to) r = r.filter(p => p.scheduledDate <= filters.to!)
-  return r
-}
-
+/**
+ * In-memory implementation for testing
+ */
 export class InMemoryLandlordPayoutScheduleStore implements LandlordPayoutScheduleStore {
-  private payouts: Map<string, LandlordPayout> = new Map()
-  private preferences: Map<string, string> = new Map()
-  seed(payout: LandlordPayout): void { this.payouts.set(payout.id, payout) }
+  private payouts: LandlordPayout[] = []
+  private preferences = new Map<string, PayoutSchedulePreference>()
 
-  async listPayouts(landlordId: string, filters?: {
-    propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel
-    from?: string; to?: string; page?: number; pageSize?: number
-  }): Promise<{ payouts: LandlordPayout[]; total: number; page: number; pageSize: number }> {
-    let results = filterPayouts(Array.from(this.payouts.values()), landlordId, filters)
-    results.sort((a, b) => new Date(b.scheduledDate).getTime() - new Date(a.scheduledDate).getTime())
-    const page = filters?.page ?? 1, pageSize = filters?.pageSize ?? 20, total = results.length
-    return { payouts: results.slice((page - 1) * pageSize, page * pageSize), total, page, pageSize }
+  /** Test helper: seed a payout. */
+  add(payout: LandlordPayout): void {
+    this.payouts.push({ ...payout, deductions: [...payout.deductions] })
   }
 
-  async getPayoutById(payoutId: string, landlordId: string): Promise<LandlordPayout | null> {
-    const p = this.payouts.get(payoutId)
-    return p && p.landlordId === landlordId ? p : null
+  private forLandlord(landlordId: string, filters: LandlordPayoutFilters): LandlordPayout[] {
+    return this.payouts
+      .filter((p) => p.landlordId === landlordId && matchesFilters(p, filters))
+      .sort((a, b) => Date.parse(a.scheduledDate) - Date.parse(b.scheduledDate))
   }
 
-  async getSchedule(landlordId: string, filters?: {
-    propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel
-    grouping?: PayoutGrouping; from?: string; to?: string
-  }): Promise<{ periods: PayoutPeriod[]; summary: PayoutScheduleSummary }> {
-    const results = filterPayouts(Array.from(this.payouts.values()), landlordId, filters)
-    return { periods: groupPayouts(results, filters?.grouping ?? 'monthly'), summary: computeSummary(results) }
+  async listForLandlord(
+    landlordId: string,
+    filters: LandlordPayoutFilters = {},
+  ): Promise<LandlordPayout[]> {
+    return this.forLandlord(landlordId, filters)
   }
 
-  async getPreference(landlordId: string): Promise<string> {
-    return this.preferences.get(landlordId) || 'monthly'
+  async listPageForLandlord(
+    landlordId: string,
+    filters: LandlordPayoutFilters,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: LandlordPayout[]; total: number }> {
+    const all = this.forLandlord(landlordId, filters)
+    const start = (page - 1) * pageSize
+    return { items: all.slice(start, start + pageSize), total: all.length }
   }
 
-  async savePreference(landlordId: string, schedule: string): Promise<string> {
-    this.preferences.set(landlordId, schedule)
-    return schedule
+  async findForLandlord(landlordId: string, payoutId: string): Promise<LandlordPayout | null> {
+    return this.payouts.find((p) => p.id === payoutId && p.landlordId === landlordId) ?? null
+  }
+
+  async getPreference(landlordId: string): Promise<PayoutSchedulePreference> {
+    return this.preferences.get(landlordId) ?? DEFAULT_PAYOUT_SCHEDULE_PREFERENCE
+  }
+
+  async setPreference(
+    landlordId: string,
+    preference: PayoutSchedulePreference,
+  ): Promise<PayoutSchedulePreference> {
+    this.preferences.set(landlordId, preference)
+    return preference
+  }
+
+  // Test helper
+  async clear(): Promise<void> {
+    this.payouts = []
+    this.preferences.clear()
   }
 }
 
-function mapRow(row: Record<string, unknown>): LandlordPayout {
-  const deductions = typeof row.deductions === 'string' ? JSON.parse(row.deductions as string) : (row.deductions as Deduction[]) || []
-  const delayReasons = typeof row.delay_reasons === 'string' ? JSON.parse(row.delay_reasons as string) : (row.delay_reasons as string[]) || []
-  return {
-    id: row.id as string, landlordId: row.landlord_id as string,
-    propertyId: row.property_id as string, propertyName: row.property_name as string,
-    scheduledDate: new Date(row.scheduled_date as string).toISOString(),
-    completedDate: row.completed_date ? new Date(row.completed_date as string).toISOString() : null,
-    grossAmount: Number(row.gross_amount), deductions, netAmount: Number(row.net_amount),
-    currency: (row.currency as string) || 'NGN',
-    status: row.status as PayoutStatus, channel: row.channel as PayoutChannel,
-    delayReasons: delayReasons as string[] as any,
-    periodStart: new Date(row.period_start as string).toISOString(),
-    periodEnd: new Date(row.period_end as string).toISOString(),
-    createdAt: new Date(row.created_at as string).toISOString(),
-    updatedAt: new Date(row.updated_at as string).toISOString(),
-  }
-}
+const PAYOUT_COLUMNS = `
+  id, landlord_id, property_id, property_name, scheduled_date, completed_date,
+  gross_amount, deductions, net_amount, currency, status, channel, delay_reasons,
+  period_start, period_end, created_at, updated_at`
 
+/**
+ * PostgreSQL implementation
+ */
 export class PostgresLandlordPayoutScheduleStore implements LandlordPayoutScheduleStore {
-  async listPayouts(landlordId: string, filters?: {
-    propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel
-    from?: string; to?: string; page?: number; pageSize?: number
-  }): Promise<{ payouts: LandlordPayout[]; total: number; page: number; pageSize: number }> {
-    const pool = await getPool()
-    if (!pool) throw new Error('Database not configured')
-    const conds = ['landlord_id = $1'], params: unknown[] = [landlordId]
-    let i = 2
-    if (filters?.propertyId) { conds.push(`property_id = $${i++}`); params.push(filters.propertyId) }
-    if (filters?.status) { conds.push(`status = $${i++}`); params.push(filters.status) }
-    if (filters?.channel) { conds.push(`channel = $${i++}`); params.push(filters.channel) }
-    if (filters?.from) { conds.push(`scheduled_date >= $${i++}`); params.push(filters.from) }
-    if (filters?.to) { conds.push(`scheduled_date <= $${i++}`); params.push(filters.to) }
-    const where = `WHERE ${conds.join(' AND ')}`
-    const page = filters?.page ?? 1, pageSize = Math.min(100, filters?.pageSize ?? 20)
-    const cr = await pool.query(`SELECT COUNT(*)::int AS total FROM landlord_payouts ${where}`, params)
-    const dr = await pool.query(`SELECT * FROM landlord_payouts ${where} ORDER BY scheduled_date DESC LIMIT $${i++} OFFSET $${i}`, [...params, pageSize, (page - 1) * pageSize])
-    return { payouts: dr.rows.map(mapRow), total: cr.rows[0].total, page, pageSize }
+  private buildWhere(
+    landlordId: string,
+    filters: LandlordPayoutFilters,
+  ): { where: string; params: unknown[] } {
+    const params: unknown[] = [landlordId]
+    const clauses = ['landlord_id = $1']
+    if (filters.propertyId) {
+      params.push(filters.propertyId)
+      clauses.push(`property_id = $${params.length}`)
+    }
+    if (filters.status) {
+      params.push(filters.status)
+      clauses.push(`status = $${params.length}`)
+    }
+    if (filters.channel) {
+      params.push(filters.channel)
+      clauses.push(`channel = $${params.length}`)
+    }
+    if (filters.from) {
+      params.push(filters.from)
+      clauses.push(`scheduled_date >= $${params.length}`)
+    }
+    if (filters.to) {
+      params.push(filters.to)
+      clauses.push(`scheduled_date <= $${params.length}`)
+    }
+    return { where: clauses.join(' AND '), params }
   }
 
-  async getPayoutById(payoutId: string, landlordId: string): Promise<LandlordPayout | null> {
+  async listForLandlord(
+    landlordId: string,
+    filters: LandlordPayoutFilters = {},
+  ): Promise<LandlordPayout[]> {
     const pool = await getPool()
-    if (!pool) throw new Error('Database not configured')
-    const { rows } = await pool.query(`SELECT * FROM landlord_payouts WHERE id = $1 AND landlord_id = $2`, [payoutId, landlordId])
-    return rows.length > 0 ? mapRow(rows[0]) : null
+    if (!pool) throw new Error('Database pool not initialized')
+    const { where, params } = this.buildWhere(landlordId, filters)
+    const result = await pool.query(
+      `SELECT ${PAYOUT_COLUMNS}
+       FROM landlord_payouts
+       WHERE ${where}
+       ORDER BY scheduled_date ASC, id ASC`,
+      params,
+    )
+    return result.rows.map((row: any) => this.mapRow(row))
   }
 
-  async getSchedule(landlordId: string, filters?: {
-    propertyId?: string; status?: PayoutStatus; channel?: PayoutChannel
-    grouping?: PayoutGrouping; from?: string; to?: string
-  }): Promise<{ periods: PayoutPeriod[]; summary: PayoutScheduleSummary }> {
-    const all = await this.listPayouts(landlordId, { ...filters, page: 1, pageSize: 1000 })
-    const payouts = all.payouts
-    return { periods: groupPayouts(payouts, filters?.grouping ?? 'monthly'), summary: computeSummary(payouts) }
+  async listPageForLandlord(
+    landlordId: string,
+    filters: LandlordPayoutFilters,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: LandlordPayout[]; total: number }> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database pool not initialized')
+    const { where, params } = this.buildWhere(landlordId, filters)
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM landlord_payouts WHERE ${where}`,
+      params,
+    )
+    const pageParams = [...params, pageSize, (page - 1) * pageSize]
+    const result = await pool.query(
+      `SELECT ${PAYOUT_COLUMNS}
+       FROM landlord_payouts
+       WHERE ${where}
+       ORDER BY scheduled_date ASC, id ASC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      pageParams,
+    )
+    return {
+      items: result.rows.map((row: any) => this.mapRow(row)),
+      total: Number(countResult.rows[0]?.total ?? 0),
+    }
   }
 
-  async getPreference(landlordId: string): Promise<string> {
+  async findForLandlord(landlordId: string, payoutId: string): Promise<LandlordPayout | null> {
     const pool = await getPool()
-    if (!pool) return 'monthly'
-    const { rows } = await pool.query('SELECT schedule_preference FROM landlord_payout_preferences WHERE landlord_id = $1', [landlordId])
-    return rows.length > 0 ? rows[0].schedule_preference : 'monthly'
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = await pool.query(
+      `SELECT ${PAYOUT_COLUMNS}
+       FROM landlord_payouts
+       WHERE id = $1 AND landlord_id = $2`,
+      [payoutId, landlordId],
+    )
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null
   }
 
-  async savePreference(landlordId: string, schedule: string): Promise<string> {
+  async getPreference(landlordId: string): Promise<PayoutSchedulePreference> {
     const pool = await getPool()
-    if (!pool) throw new Error('Database not configured')
-    await pool.query(
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = await pool.query(
+      `SELECT schedule_preference FROM landlord_payout_preferences WHERE landlord_id = $1`,
+      [landlordId],
+    )
+    return (result.rows[0]?.schedule_preference as PayoutSchedulePreference) ??
+      DEFAULT_PAYOUT_SCHEDULE_PREFERENCE
+  }
+
+  async setPreference(
+    landlordId: string,
+    preference: PayoutSchedulePreference,
+  ): Promise<PayoutSchedulePreference> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database pool not initialized')
+    const result = await pool.query(
       `INSERT INTO landlord_payout_preferences (landlord_id, schedule_preference, updated_at)
        VALUES ($1, $2, NOW())
-       ON CONFLICT (landlord_id) DO UPDATE SET schedule_preference = $2, updated_at = NOW()`,
-      [landlordId, schedule]
+       ON CONFLICT (landlord_id) DO UPDATE
+         SET schedule_preference = EXCLUDED.schedule_preference,
+             updated_at = NOW()
+       RETURNING schedule_preference`,
+      [landlordId, preference],
     )
-    return schedule
+    return result.rows[0].schedule_preference as PayoutSchedulePreference
+  }
+
+  private mapRow(row: any): LandlordPayout {
+    const deductions: Deduction[] = Array.isArray(row.deductions)
+      ? row.deductions.map((d: any) => ({
+          type: d.type,
+          label: d.label,
+          amount: Number(d.amount),
+        }))
+      : []
+    const delayReasons: DelayReason[] = Array.isArray(row.delay_reasons)
+      ? row.delay_reasons
+      : []
+    return {
+      id: row.id,
+      landlordId: row.landlord_id,
+      propertyId: row.property_id,
+      propertyName: row.property_name,
+      scheduledDate: toIso(row.scheduled_date),
+      completedDate: row.completed_date ? toIso(row.completed_date) : null,
+      grossAmount: Number(row.gross_amount),
+      deductions,
+      netAmount: Number(row.net_amount),
+      currency: row.currency,
+      status: row.status,
+      channel: row.channel,
+      delayReasons,
+      periodStart: toIso(row.period_start),
+      periodEnd: toIso(row.period_end),
+      createdAt: toIso(row.created_at),
+      updatedAt: toIso(row.updated_at),
+    }
   }
 }
 
-let store: LandlordPayoutScheduleStore
+// Singleton instance
+let landlordPayoutScheduleStore: LandlordPayoutScheduleStore =
+  new InMemoryLandlordPayoutScheduleStore()
 
-export function getLandlordPayoutScheduleStore(): LandlordPayoutScheduleStore {
-  if (!store) {
-    store = process.env.DATABASE_URL
-      ? new PostgresLandlordPayoutScheduleStore()
-      : new InMemoryLandlordPayoutScheduleStore()
-  }
-  return store
+export function initLandlordPayoutScheduleStore(store: LandlordPayoutScheduleStore): void {
+  landlordPayoutScheduleStore = store
 }
 
-export function initLandlordPayoutScheduleStore(usePostgres: boolean): void {
-  store = usePostgres ? new PostgresLandlordPayoutScheduleStore() : new InMemoryLandlordPayoutScheduleStore()
-}
+export { landlordPayoutScheduleStore }

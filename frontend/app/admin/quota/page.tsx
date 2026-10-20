@@ -1,286 +1,489 @@
 "use client";
 
-import { useState } from "react";
-import { Gauge, Search, Loader2, RotateCcw, PlusCircle, Trash2, AlertCircle } from "lucide-react";
+/**
+ * Admin quota management (#1913).
+ *
+ * Stats header, user lookup (current usage + active overrides), override
+ * create/remove, and usage reset. Destructive actions sit behind a
+ * confirmation dialog. Results are announced through toasts. The backend
+ * enforces admin access; a 403 is shown as an access-denied error state.
+ */
+
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Loader2, RotateCcw, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState, EmptyState } from "@/components/ui/data-state";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  fetchQuotaUsage,
-  fetchQuotaOverrides,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ApiError } from "@/lib/apiClient";
+import {
   createQuotaOverride,
+  fetchQuotaOverrides,
+  fetchQuotaStats,
+  fetchQuotaUsage,
   removeQuotaOverride,
   resetQuota,
-  type QuotaUsage,
   type QuotaOverride,
+  type QuotaStats,
+  type QuotaUsage,
 } from "@/lib/quotaAdminApi";
-import { handleError, showSuccessToast } from "@/lib/toast";
+import {
+  quotaLookupSchema,
+  quotaOverrideSchema,
+  type QuotaLookupFormValues,
+  type QuotaOverrideFormValues,
+} from "@/lib/formSchemas";
+import { showErrorToast, showSuccessToast } from "@/lib/toast";
+
+type AsyncState<T> =
+  | { status: "loading" }
+  | { status: "error"; message: string; code?: number }
+  | { status: "ready"; data: T };
+
+type Target = { userId: string; endpoint?: string };
+
+type UserDetail =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string; code?: number }
+  | { status: "ready"; usage: QuotaUsage; overrides: QuotaOverride[] };
+
+function describeError(err: unknown, fallback: string) {
+  const code = err instanceof ApiError ? err.status : undefined;
+  if (code === 403) {
+    return { message: "Access denied — admin credentials required", code };
+  }
+  return { message: err instanceof Error && err.message ? err.message : fallback, code };
+}
+
+function formatTimestamp(value?: number) {
+  return typeof value === "number" ? new Date(value).toLocaleString() : "—";
+}
+
+function FieldError({ message, id }: { message?: string; id: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} role="alert" className="text-sm text-destructive">
+      {message}
+    </p>
+  );
+}
 
 export default function AdminQuotaPage() {
-  const [lookupUserId, setLookupUserId] = useState("");
-  const [lookupEndpoint, setLookupEndpoint] = useState("");
+  const [stats, setStats] = useState<AsyncState<QuotaStats>>({ status: "loading" });
+  const [statsReload, setStatsReload] = useState(0);
+  const [target, setTarget] = useState<Target | null>(null);
+  const [detail, setDetail] = useState<UserDetail>({ status: "idle" });
+  const [overrideToRemove, setOverrideToRemove] = useState<QuotaOverride | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
 
-  const [activeUserId, setActiveUserId] = useState<string | null>(null);
-  const [usage, setUsage] = useState<QuotaUsage | null>(null);
-  const [overrides, setOverrides] = useState<QuotaOverride[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const [overrideForm, setOverrideForm] = useState({
-    endpoint: "",
-    elevatedLimit: "",
-    reason: "",
+  const lookupForm = useForm<QuotaLookupFormValues>({
+    resolver: zodResolver(quotaLookupSchema),
+    mode: "onBlur",
+    reValidateMode: "onBlur",
+    shouldFocusError: true,
+    defaultValues: { userId: "", endpoint: "" },
   });
-  const [submitting, setSubmitting] = useState(false);
-  const [resetting, setResetting] = useState(false);
 
-  const loadUser = async (userId: string) => {
-    if (!userId.trim()) return;
-    setLoading(true);
+  const overrideForm = useForm<QuotaOverrideFormValues>({
+    resolver: zodResolver(quotaOverrideSchema),
+    mode: "onBlur",
+    reValidateMode: "onBlur",
+    shouldFocusError: true,
+    defaultValues: { endpoint: "", elevatedLimit: Number.NaN, reason: "", expiresAt: "" },
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchQuotaStats()
+      .then((data) => {
+        if (!cancelled) setStats({ status: "ready", data });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setStats({ status: "error", ...describeError(err, "Failed to load quota stats") });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [statsReload]);
+
+  const retryStats = () => {
+    setStats({ status: "loading" });
+    setStatsReload((n) => n + 1);
+  };
+
+  const loadUser = async (next: Target) => {
+    setTarget(next);
+    setDetail({ status: "loading" });
     try {
-      const [usageRes, overridesRes] = await Promise.all([
-        fetchQuotaUsage(userId, lookupEndpoint || undefined),
-        fetchQuotaOverrides(userId),
+      const [usage, overrides] = await Promise.all([
+        fetchQuotaUsage(next.userId, next.endpoint),
+        fetchQuotaOverrides(next.userId),
       ]);
-      setUsage(usageRes);
-      setOverrides(overridesRes);
-      setActiveUserId(userId);
-    } catch (err) {
-      handleError(err, "Failed to load quota state for this user");
-      setUsage(null);
-      setOverrides([]);
-      setActiveUserId(null);
-    } finally {
-      setLoading(false);
+      setDetail({ status: "ready", usage, overrides });
+    } catch (err: unknown) {
+      setDetail({ status: "error", ...describeError(err, "Failed to load user quota") });
     }
   };
 
-  const handleLookup = (e: React.FormEvent) => {
-    e.preventDefault();
-    loadUser(lookupUserId);
+  const onLookup = (values: QuotaLookupFormValues) => {
+    void loadUser({ userId: values.userId, endpoint: values.endpoint || undefined });
   };
 
-  const handleCreateOverride = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeUserId) return;
-    const elevatedLimit = Number(overrideForm.elevatedLimit);
-    if (!Number.isFinite(elevatedLimit) || elevatedLimit <= 0 || !overrideForm.reason.trim()) {
-      handleError(new Error("Provide a positive limit and a reason"), "Invalid override");
-      return;
-    }
-
-    setSubmitting(true);
+  const onCreateOverride = async (values: QuotaOverrideFormValues) => {
+    if (!target) return;
     try {
       await createQuotaOverride({
-        userId: activeUserId,
-        endpoint: overrideForm.endpoint || undefined,
-        elevatedLimit,
-        reason: overrideForm.reason,
+        userId: target.userId,
+        endpoint: values.endpoint || undefined,
+        elevatedLimit: values.elevatedLimit,
+        reason: values.reason,
+        expiresAt: values.expiresAt ? new Date(values.expiresAt).getTime() : undefined,
       });
       showSuccessToast("Quota override created");
-      setOverrideForm({ endpoint: "", elevatedLimit: "", reason: "" });
-      await loadUser(activeUserId);
-    } catch (err) {
-      handleError(err, "Failed to create quota override");
-    } finally {
-      setSubmitting(false);
+      overrideForm.reset({ endpoint: "", elevatedLimit: Number.NaN, reason: "", expiresAt: "" });
+      await loadUser(target);
+    } catch (err: unknown) {
+      showErrorToast(err, "Could not create the quota override");
     }
   };
 
-  const handleRemoveOverride = async (endpoint?: string) => {
-    if (!activeUserId) return;
+  const onRemoveOverride = async () => {
+    if (!target || !overrideToRemove) return;
+    const removed = overrideToRemove;
+    setOverrideToRemove(null);
     try {
-      await removeQuotaOverride(activeUserId, endpoint);
+      await removeQuotaOverride(target.userId, removed.endpoint);
       showSuccessToast("Quota override removed");
-      await loadUser(activeUserId);
-    } catch (err) {
-      handleError(err, "Failed to remove quota override");
+      await loadUser(target);
+    } catch (err: unknown) {
+      showErrorToast(err, "Could not remove the quota override");
     }
   };
 
-  const handleReset = async () => {
-    if (!activeUserId) return;
-    setResetting(true);
+  const onResetUsage = async () => {
+    if (!target) return;
+    setConfirmReset(false);
     try {
-      await resetQuota(activeUserId, lookupEndpoint || undefined);
-      showSuccessToast("Quota reset");
-      await loadUser(activeUserId);
-    } catch (err) {
-      handleError(err, "Failed to reset quota");
-    } finally {
-      setResetting(false);
+      await resetQuota(target.userId, target.endpoint);
+      showSuccessToast("Quota usage reset");
+      await loadUser(target);
+    } catch (err: unknown) {
+      showErrorToast(err, "Could not reset quota usage");
     }
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b-4 border-foreground bg-card p-6 md:p-10">
-        <div className="container mx-auto space-y-2">
-          <div className="flex items-center gap-3">
-            <Gauge className="w-8 h-8 md:w-10 md:h-10 text-primary" />
-            <h1 className="text-3xl md:text-5xl font-black tracking-tighter uppercase italic">
-              Quota <span className="text-primary">Management</span>
-            </h1>
-          </div>
-          <p className="text-lg font-bold text-muted-foreground max-w-2xl">
-            Look up a user's rate/usage quota state and adjust it — grant a temporary elevated
-            limit, remove an override, or reset counters during a live incident.
-          </p>
-        </div>
+    <div className="flex flex-col gap-6 p-4 md:p-6">
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight">Quota management</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Look up a user to see their rate-limit usage, manage elevated overrides, or reset their usage.
+        </p>
       </header>
 
-      <main id="main-content" className="container mx-auto px-4 py-12 md:py-16 space-y-10">
-        <Card className="border-3 border-foreground p-6 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
-          <form onSubmit={handleLookup} className="flex flex-col md:flex-row gap-4 md:items-end">
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="lookup-user-id" className="font-bold uppercase text-xs">User ID</Label>
-              <Input
-                id="lookup-user-id"
-                value={lookupUserId}
-                onChange={(e) => setLookupUserId(e.target.value)}
-                placeholder="user-uuid"
-                required
-              />
-            </div>
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="lookup-endpoint" className="font-bold uppercase text-xs">Endpoint (optional)</Label>
-              <Input
-                id="lookup-endpoint"
-                value={lookupEndpoint}
-                onChange={(e) => setLookupEndpoint(e.target.value)}
-                placeholder="e.g. /api/v1/withdrawals"
-              />
-            </div>
-            <Button
-              type="submit"
-              disabled={loading}
-              className="font-bold border-2 border-foreground shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
-            >
-              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
-              Look Up
-            </Button>
-          </form>
-        </Card>
-
-        {activeUserId && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <Card className="border-3 border-foreground p-6 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-black uppercase">Current Usage</h2>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={handleReset}
-                  disabled={resetting}
-                  className="font-bold border-2 border-foreground shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
-                >
-                  {resetting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-1" />}
-                  Reset
-                </Button>
-              </div>
-
-              {usage ? (
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="p-3 border-2 border-foreground bg-muted/50">
-                    <p className="text-xs uppercase font-bold text-muted-foreground">Per-minute</p>
-                    <p className="font-black text-lg">{usage.minuteUsage} / {usage.minuteLimit}</p>
-                  </div>
-                  <div className="p-3 border-2 border-foreground bg-muted/50">
-                    <p className="text-xs uppercase font-bold text-muted-foreground">Per-day</p>
-                    <p className="font-black text-lg">{usage.dayUsage} / {usage.dayLimit}</p>
-                  </div>
-                  {usage.nearLimit && (
-                    <div className="col-span-2 flex items-center gap-2 text-destructive font-bold text-xs">
-                      <AlertCircle className="w-4 h-4" />
-                      This user is near their quota limit
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No usage data available.</p>
-              )}
-            </Card>
-
-            <Card className="border-3 border-foreground p-6 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] space-y-4">
-              <h2 className="text-xl font-black uppercase">Active Overrides</h2>
-              {overrides.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No overrides configured for this user.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {overrides.map((o) => (
-                    <li
-                      key={`${o.userId}:${o.endpoint ?? "all"}`}
-                      className="flex items-center justify-between gap-3 p-3 border-2 border-foreground bg-muted/30"
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <Badge className="border-2 border-foreground font-bold">{o.endpoint ?? "all endpoints"}</Badge>
-                          <span className="font-mono text-xs font-bold">limit: {o.elevatedLimit}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{o.reason}</p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleRemoveOverride(o.endpoint)}
-                        className="text-destructive"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <form onSubmit={handleCreateOverride} className="pt-4 border-t-2 border-foreground/20 space-y-3">
-                <h3 className="text-sm font-black uppercase">New Override</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="override-endpoint" className="text-xs font-bold uppercase">Endpoint</Label>
-                    <Input
-                      id="override-endpoint"
-                      value={overrideForm.endpoint}
-                      onChange={(e) => setOverrideForm((f) => ({ ...f, endpoint: e.target.value }))}
-                      placeholder="all endpoints"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="override-limit" className="text-xs font-bold uppercase">Elevated Limit</Label>
-                    <Input
-                      id="override-limit"
-                      type="number"
-                      min={1}
-                      max={10000}
-                      value={overrideForm.elevatedLimit}
-                      onChange={(e) => setOverrideForm((f) => ({ ...f, elevatedLimit: e.target.value }))}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="override-reason" className="text-xs font-bold uppercase">Reason</Label>
-                  <Input
-                    id="override-reason"
-                    value={overrideForm.reason}
-                    onChange={(e) => setOverrideForm((f) => ({ ...f, reason: e.target.value }))}
-                    placeholder="Why is this user getting an elevated limit?"
-                    required
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full font-bold border-2 border-foreground shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
-                >
-                  {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <PlusCircle className="w-4 h-4 mr-2" />}
-                  Create Override
-                </Button>
-              </form>
-            </Card>
+      {/* Stats header */}
+      <section aria-labelledby="quota-stats-heading" className="space-y-3">
+        <h2 id="quota-stats-heading" className="text-lg font-semibold">
+          Overview
+        </h2>
+        {stats.status === "loading" && (
+          <div className="grid gap-3 sm:grid-cols-2" role="status" aria-live="polite">
+            <span className="sr-only">Loading quota stats</span>
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
           </div>
         )}
-      </main>
+        {stats.status === "error" && (
+          <ErrorState
+            title="Quota stats are unavailable"
+            description={stats.message}
+            onRetry={retryStats}
+          />
+        )}
+        {stats.status === "ready" && (
+          <dl className="grid gap-3 sm:grid-cols-2">
+            <div className="border-2 border-foreground bg-card p-4">
+              <dt className="text-sm text-muted-foreground">Total overrides</dt>
+              <dd className="font-mono text-2xl font-bold">{stats.data.totalOverrides}</dd>
+            </div>
+            <div className="border-2 border-foreground bg-card p-4">
+              <dt className="text-sm text-muted-foreground">Active overrides</dt>
+              <dd className="font-mono text-2xl font-bold">{stats.data.activeOverrides}</dd>
+            </div>
+          </dl>
+        )}
+      </section>
+
+      {/* User lookup */}
+      <section aria-labelledby="quota-lookup-heading" className="border-2 border-foreground bg-card p-4">
+        <h2 id="quota-lookup-heading" className="mb-3 text-lg font-semibold">
+          Find a user
+        </h2>
+        <form
+          onSubmit={lookupForm.handleSubmit(onLookup)}
+          noValidate
+          className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+        >
+          <div className="space-y-1">
+            <Label htmlFor="quota-user-id">User ID</Label>
+            <Input
+              id="quota-user-id"
+              aria-invalid={!!lookupForm.formState.errors.userId}
+              aria-describedby={lookupForm.formState.errors.userId ? "quota-user-id-error" : undefined}
+              {...lookupForm.register("userId")}
+            />
+            <FieldError id="quota-user-id-error" message={lookupForm.formState.errors.userId?.message} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="quota-lookup-endpoint">Endpoint (optional)</Label>
+            <Input id="quota-lookup-endpoint" {...lookupForm.register("endpoint")} />
+          </div>
+          <Button
+            type="submit"
+            disabled={lookupForm.formState.isSubmitting || detail.status === "loading"}
+            className="gap-2 border-2 border-foreground font-bold"
+          >
+            {detail.status === "loading" ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Search className="h-4 w-4" aria-hidden="true" />
+            )}
+            Look up
+          </Button>
+        </form>
+      </section>
+
+      {/* User detail */}
+      {detail.status === "idle" && (
+        <EmptyState
+          icon={Search}
+          title="No user selected"
+          description="Enter a user ID above to see their current usage and overrides."
+        />
+      )}
+
+      {detail.status === "loading" && (
+        <div className="space-y-3" role="status" aria-live="polite">
+          <span className="sr-only">Loading user quota</span>
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      )}
+
+      {detail.status === "error" && target && (
+        <ErrorState
+          title="Could not load this user's quota"
+          description={detail.message}
+          onRetry={() => void loadUser(target)}
+        />
+      )}
+
+      {detail.status === "ready" && target && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Usage */}
+          <section aria-labelledby="quota-usage-heading" className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="quota-usage-heading" className="text-lg font-semibold">
+                Current usage
+              </h2>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmReset(true)}
+                className="gap-2 border-2 border-foreground font-bold"
+              >
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                Reset usage
+              </Button>
+            </div>
+            <div className="overflow-x-auto border-2 border-foreground bg-card">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Endpoint</TableHead>
+                    <TableHead>Minute</TableHead>
+                    <TableHead>Day</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>{detail.usage.endpoint}</TableCell>
+                    <TableCell className="font-mono">
+                      {detail.usage.minuteUsage} / {detail.usage.minuteLimit}
+                    </TableCell>
+                    <TableCell className="font-mono">
+                      {detail.usage.dayUsage} / {detail.usage.dayLimit}
+                    </TableCell>
+                    <TableCell>
+                      {detail.usage.nearLimit ? <Badge variant="destructive">Near limit</Badge> : "OK"}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+
+          {/* Overrides */}
+          <section aria-labelledby="quota-overrides-heading" className="space-y-3">
+            <h2 id="quota-overrides-heading" className="text-lg font-semibold">
+              Overrides
+            </h2>
+            {detail.overrides.length === 0 ? (
+              <EmptyState
+                title="No overrides"
+                description="This user is on the default limits. Create an override below to raise them."
+              />
+            ) : (
+              <div className="overflow-x-auto border-2 border-foreground bg-card">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Endpoint</TableHead>
+                      <TableHead>Limit</TableHead>
+                      <TableHead>Reason</TableHead>
+                      <TableHead>Expires</TableHead>
+                      <TableHead>
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {detail.overrides.map((override) => (
+                      <TableRow key={`${override.endpoint ?? "all"}-${override.createdAt}`}>
+                        <TableCell>{override.endpoint ?? "All endpoints"}</TableCell>
+                        <TableCell className="font-mono">{override.elevatedLimit}</TableCell>
+                        <TableCell className="max-w-[12rem] truncate">{override.reason}</TableCell>
+                        <TableCell>{formatTimestamp(override.expiresAt)}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Remove override for ${override.endpoint ?? "all endpoints"}`}
+                            onClick={() => setOverrideToRemove(override)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {/* Create override */}
+            <form
+              onSubmit={overrideForm.handleSubmit(onCreateOverride)}
+              noValidate
+              aria-labelledby="quota-create-heading"
+              className="space-y-4 border-2 border-foreground bg-card p-4"
+            >
+              <h3 id="quota-create-heading" className="font-semibold">
+                Create override
+              </h3>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="override-endpoint">Endpoint (optional)</Label>
+                  <Input id="override-endpoint" {...overrideForm.register("endpoint")} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="override-limit">Elevated limit</Label>
+                  <Input
+                    id="override-limit"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    aria-invalid={!!overrideForm.formState.errors.elevatedLimit}
+                    aria-describedby={overrideForm.formState.errors.elevatedLimit ? "override-limit-error" : undefined}
+                    {...overrideForm.register("elevatedLimit", { valueAsNumber: true })}
+                  />
+                  <FieldError
+                    id="override-limit-error"
+                    message={overrideForm.formState.errors.elevatedLimit?.message}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="override-reason">Reason</Label>
+                  <Input
+                    id="override-reason"
+                    aria-invalid={!!overrideForm.formState.errors.reason}
+                    aria-describedby={overrideForm.formState.errors.reason ? "override-reason-error" : undefined}
+                    {...overrideForm.register("reason")}
+                  />
+                  <FieldError id="override-reason-error" message={overrideForm.formState.errors.reason?.message} />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="override-expires">Expires (optional)</Label>
+                  <Input
+                    id="override-expires"
+                    type="datetime-local"
+                    aria-invalid={!!overrideForm.formState.errors.expiresAt}
+                    aria-describedby={overrideForm.formState.errors.expiresAt ? "override-expires-error" : undefined}
+                    {...overrideForm.register("expiresAt")}
+                  />
+                  <FieldError id="override-expires-error" message={overrideForm.formState.errors.expiresAt?.message} />
+                </div>
+              </div>
+              <Button
+                type="submit"
+                disabled={overrideForm.formState.isSubmitting}
+                className="border-2 border-foreground font-bold"
+              >
+                Create override
+              </Button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {/* Confirmations */}
+      <AlertDialog open={overrideToRemove !== null} onOpenChange={(open) => !open && setOverrideToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this override?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The user goes back to the default limits for {overrideToRemove?.endpoint ?? "all endpoints"}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void onRemoveOverride()}>Remove override</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset quota usage?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This clears the current minute and day counters for this user
+              {target?.endpoint ? ` on ${target.endpoint}` : " on every endpoint"}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void onResetUsage()}>Reset usage</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

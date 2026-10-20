@@ -55,6 +55,7 @@ const usePreferencesStore = create<PreferencesState>()(
         name: "shelterflex-preferences-storage",
         storage: createJSONStorage(() => localStorage),
         version: 1,
+        skipHydration: true,
         // Persist user-facing preferences while leaving sync metadata internal.
         partialize: (state) => ({
           theme: state.theme,

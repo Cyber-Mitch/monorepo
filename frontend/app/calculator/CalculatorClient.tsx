@@ -4,7 +4,7 @@
 import { Suspense, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { ArrowRight, Info, Check, AlertCircle, Loader2, Home } from "lucide-react"
+import { ArrowRight, Info, Check, AlertCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import {
@@ -71,22 +71,6 @@ function CalculatorContent() {
             See exactly how much you will pay each month. No hidden fees, no surprises.
           </p>
 
-          {/* Rent-to-Own tab */}
-          <div className="mt-6 flex gap-3 flex-wrap">
-            <span className="border-3 border-foreground bg-primary text-primary-foreground px-4 py-2 font-mono text-sm font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
-              Installment Plan
-            </span>
-            <Link
-              href="/calculator/rent-to-own"
-              className="inline-flex items-center gap-2 border-3 border-foreground bg-background px-4 py-2 font-mono text-sm font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
-            >
-              <Home className="h-4 w-4" />
-              Rent-to-Own
-              <span className="border border-foreground bg-secondary/20 px-1 py-0.5 text-[10px] font-black uppercase">
-                Coming Soon
-              </span>
-            </Link>
-          </div>
         </div>
       </section>
 

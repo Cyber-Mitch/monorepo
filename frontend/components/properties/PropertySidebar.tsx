@@ -3,8 +3,6 @@
 import Link from "next/link"
 import {
   Calculator,
-  Home,
-  MessageSquare,
   Star,
   CheckCircle,
   Flag,
@@ -161,16 +159,6 @@ export function PropertySidebar({
                   Apply Now
                 </Button>
               </Link>
-              <Link
-                href={`/calculator/rent-to-own?price=${price}`}
-                className="flex items-center justify-center gap-1.5 border-3 border-foreground bg-background py-2.5 font-mono text-sm font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] w-full"
-              >
-                <Home className="h-4 w-4" />
-                Explore Rent-to-Own
-                <span className="border border-foreground bg-secondary/20 px-1 py-0.5 text-[9px] font-black uppercase">
-                  Soon
-                </span>
-              </Link>
               <p className="text-center text-[11px] text-muted-foreground">
                 Equity shown here is an estimate. Once a deal is live, accumulated equity is confirmed on-chain.
               </p>
@@ -247,13 +235,6 @@ export function PropertySidebar({
               answers about neighborhood life.
             </p>
           </div>
-
-          <Link href="/messages">
-            <Button className="w-full mt-4 border-3 border-secondary bg-secondary py-5 font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-              <MessageSquare className="mr-2 h-5 w-5" />
-              Message {whistleblower.name}
-            </Button>
-          </Link>
         </div>
       )}
 

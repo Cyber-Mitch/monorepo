@@ -1,32 +1,20 @@
 import { z } from 'zod'
 
-/**
- * Insurance claim request for POST /insurance/:policyId/claim
- * Validates claim submission data
- */
-export const insuranceClaimBodySchema = z
-  .object({
-    reason: z
-      .string()
-      .min(1)
-      .max(500)
-      .describe('Reason for the claim (e.g., "non-payment", "tenant-default")'),
-    claimAmount: z
-      .number()
-      .positive()
-      .describe('Amount being claimed in NGN'),
-    description: z
-      .string()
-      .min(1)
-      .max(2000)
-      .optional()
-      .describe('Detailed description of the claim'),
-    claimDate: z
-      .string()
-      .datetime()
-      .optional()
-      .describe('ISO 8601 date when the claim incident occurred'),
-  })
-  .strict()
+export const dealIdParamSchema = z.object({
+  dealId: z.string().uuid(),
+})
 
-export type InsuranceClaimBody = z.infer<typeof insuranceClaimBodySchema>
+export const policyIdParamSchema = z.object({
+  id: z.string().uuid(),
+})
+
+export const cancelPolicySchema = z.object({
+  reason: z.string().trim().min(3).max(500).optional(),
+})
+
+export const fileClaimSchema = z.object({
+  amountNgn: z.number().positive().max(1_000_000_000),
+  reason: z.string().trim().min(10, 'Describe the reason for the claim').max(2000),
+})
+
+export type FileClaimRequest = z.infer<typeof fileClaimSchema>

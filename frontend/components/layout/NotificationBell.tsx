@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import Link from "next/link"
-import { Bell, CheckCheck, MessageCircle } from "lucide-react"
+import { Bell, CheckCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useUnreadCount } from "@/hooks/use-unread-count"
 import { NotificationItemRow } from "./NotificationItem"
@@ -11,7 +10,7 @@ import { isAuthenticated } from "@/lib/auth"
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
-  const { totalUnread, notifUnread, msgUnread, notifications, notifConnected, msgConnected } = useUnreadCount()
+  const { totalUnread, notifUnread, notifications, notifConnected } = useUnreadCount()
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -34,7 +33,7 @@ export function NotificationBell() {
   }
 
   const ariaLabel = totalUnread > 0
-    ? `Notifications, ${notifUnread} unread notifications and ${msgUnread} unread messages`
+    ? `Notifications, ${notifUnread} unread notifications`
     : "Notifications, no unread items"
 
   return (
@@ -60,7 +59,7 @@ export function NotificationBell() {
           <div className="flex items-center justify-between p-3 border-b-2 border-foreground/10">
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold">Notifications</span>
-              {notifConnected && msgConnected ? (
+              {notifConnected ? (
                 <span className="h-2 w-2 rounded-full bg-green-500" title="Connected" />
               ) : (
                 <span className="h-2 w-2 rounded-full bg-yellow-500" title="Fallback mode" />
@@ -74,27 +73,6 @@ export function NotificationBell() {
             )}
           </div>
 
-          {/* Messages Section */}
-          {msgUnread > 0 && (
-            <Link
-              href="/messages"
-              className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors border-b-2 border-foreground/10"
-              onClick={() => setOpen(false)}
-            >
-              <div className="flex h-8 w-8 items-center justify-center border-2 border-foreground bg-secondary/20">
-                <MessageCircle className="h-4 w-4" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold">Messages</p>
-                <p className="text-xs text-muted-foreground">
-                  {msgUnread} unread conversation{msgUnread !== 1 ? "s" : ""}
-                </p>
-              </div>
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center border-2 border-foreground bg-primary text-xs font-bold">
-                {msgUnread > 99 ? "99+" : msgUnread}
-              </div>
-            </Link>
-          )}
 
           {/* Notifications List */}
           <div className="max-h-64 overflow-y-auto">
@@ -110,14 +88,6 @@ export function NotificationBell() {
             )}
           </div>
 
-          {/* View All Messages Link */}
-          <Link
-            href="/messages"
-            className="block border-t-2 border-foreground/10 p-3 text-center text-xs font-bold text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => setOpen(false)}
-          >
-            View all messages
-          </Link>
         </div>
       )}
     </div>

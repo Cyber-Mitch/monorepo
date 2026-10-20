@@ -32,8 +32,8 @@ export class CreditScoreService {
     return creditScoreSnapshotStore.getLatestByUserId(tenantId)
   }
 
-  async getHistory(tenantId: string): Promise<CreditScoreSnapshot[]> {
-    return creditScoreSnapshotStore.getHistoryByUserId(tenantId, 12)
+  async getHistory(tenantId: string, limit = 12): Promise<CreditScoreSnapshot[]> {
+    return creditScoreSnapshotStore.getHistoryByUserId(tenantId, limit)
   }
 
   generateImprovementTips(snapshot: CreditScoreSnapshot): string[] {

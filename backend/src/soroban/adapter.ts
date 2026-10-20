@@ -107,61 +107,6 @@ export interface OraclePriceReading {
 }
 
 /**
- * Mirrors `ProposalStatus` in contracts/governance/src/lib.rs.
- */
-export type GovernanceProposalStatus =
-  | 'Active'
-  | 'Passed'
-  | 'Rejected'
-  | 'Executed'
-  | 'Cancelled'
-
-/**
- * Mirrors the `Proposal` struct in contracts/governance/src/lib.rs.
- *
- * All i128 fields are carried as decimal *strings* rather than numbers so that
- * values larger than Number.MAX_SAFE_INTEGER survive the trip through JSON
- * without silent precision loss.
- *
- * `paramKey` is an arbitrary Soroban `Symbol` chosen by the proposer — the
- * contract neither validates nor enumerates it, so it is opaque to the backend
- * too (see the PR description's contract findings).
- */
-export interface GovernanceProposal {
-  id: number
-  proposer: string
-  paramKey: string
-  currentValue: string
-  proposedValue: string
-  votesFor: string
-  votesAgainst: string
-  status: GovernanceProposalStatus
-  createdAt: number
-  votingEndsAt: number
-  snapshottedTotalStaked: string
-}
-
-export interface CreateGovernanceProposalParams {
-  /** Stellar address of the proposer; also the transaction's source account. */
-  proposer: string
-  paramKey: string
-  currentValue: bigint
-  proposedValue: bigint
-}
-
-export interface GovernanceVoteParams {
-  /** Stellar address of the voter; also the transaction's source account. */
-  voter: string
-  proposalId: number
-  support: boolean
-}
-
-/** An unsigned transaction envelope awaiting a signature from the end user's wallet. */
-export interface UnsignedTransaction {
-  xdr: string
-}
-
-/**
  * Callback fired after a Stellar transaction is signed and hashed but *before*
  * it is broadcast to the network. Persisting the hash at this point allows a
  * worker that crashes between broadcast and result-recording to recover by
@@ -193,45 +138,6 @@ export interface TenantReputationRecord {
 }
 
 /**
- * A single delegation row from stake_delegation's `get_delegations`, mirroring
- * the contract's `Delegation` struct.
- *
- * `amount` is in stake_delegation's own units (USDC, 6 decimals). Note that
- * stake_delegation keeps a *separate* stake ledger from staking_pool — see
- * `DelegationPosition` — so this amount is never a slice of the staking_pool
- * position surfaced by `getStakedBalance`.
- */
-export interface DelegationRecord {
-  delegatee: string
-  amount: bigint
-  activatedEpoch: number
-}
-
-/**
- * A delegator's full position inside stake_delegation. `staked` is the balance
- * held by stake_delegation itself (`staked_balance`), NOT the staking_pool
- * position; `delegated` is the part of it currently routed to delegatees and
- * `free` is the remainder the contract will let the user delegate or unstake.
- */
-export interface DelegationPosition {
-  staked: bigint
-  delegated: bigint
-  free: bigint
-  currentEpoch: number
-  delegations: DelegationRecord[]
-}
-
-/**
- * What a delegatee has earned: net rewards after their commission split, plus
- * the commission itself. The contract exposes no getter for the configured
- * commission *rate*, so only the two balances are readable off-chain.
- */
-export interface DelegateeEarnings {
-  claimable: bigint
-  commissionClaimable: bigint
-}
-
-/**
  * On-chain receipt from transaction-receipt-contract.
  * Mirrors the contract's Receipt struct.
  */
@@ -260,24 +166,6 @@ export interface AllowlistEntry {
   label: string           // Human-readable label (role, tier, etc.)
   expires_at: number      // Unix timestamp (seconds) after which entry is expired. 0 means no expiry.
   added_at: number        // Ledger sequence number when entry was added
-}
-
-/**
- * Epoch info from epoch_rewards contract.
- * Mirrors the contract's EpochInfo struct.
- */
-export interface EpochInfo {
-  epoch_number: number
-  start_ts: number
-  duration_secs: number
-  end_ts: number
-  seal_ts: number
-  sealed: boolean
-  total_rewards: bigint
-  carried_forward: bigint
-  reward_index_at_seal: bigint
-  dust: bigint
-  total_claimable_at_seal: bigint
 }
 
 export interface SorobanAdapter {
@@ -346,12 +234,6 @@ export interface SorobanAdapter {
   hasPermission?(address: string, permission: number): Promise<boolean>
   listRoles?(): Promise<Array<{ address: string; role: number }>>
 
-  // Upgradeable proxy governance (upgradeable_proxy contract)
-  proposeUpgrade?(newWasmHash: string): Promise<string>
-  confirmUpgrade?(newWasmHash: string): Promise<string>
-  cancelUpgrade?(): Promise<string>
-  transferAdmin?(newAdminAddress: string): Promise<string>
-  hasPendingUpgrade?(): Promise<boolean>
   // deal_escrow rent-release dispute mechanism
   requestRentRelease?(params: RequestRentReleaseParams): Promise<void>
   challengeRentRelease?(params: ChallengeRentReleaseParams): Promise<void>
@@ -365,35 +247,9 @@ export interface SorobanAdapter {
   completeRentToOwnDeal?(params: RentToOwnDealActionParams): Promise<void>
   defaultRentToOwnDeal?(params: RentToOwnDealActionParams): Promise<void>
 
-  // stake_delegation contract (#1489) — a standalone delegated-staking ledger,
-  // disjoint from staking_pool/staking_rewards. See real-adapter.ts for the
-  // signer-model caveat on the write methods.
-  delegateStake?(delegator: string, delegatee: string, amount: bigint): Promise<string>
-  requestUndelegate?(delegator: string, delegatee: string, amount: bigint): Promise<string>
-  completeUndelegate?(delegator: string, delegatee: string): Promise<string>
-  claimDelegateeRewards?(delegatee: string): Promise<string>
-  setDelegateeCommission?(delegatee: string, rateBps: number): Promise<string>
-  claimDelegateeCommission?(delegatee: string): Promise<string>
-  getDelegations?(delegator: string): Promise<DelegationRecord[]>
-  getDelegationStakedBalance?(account: string): Promise<bigint>
-  getDelegationEpoch?(): Promise<number>
-  getDelegateeClaimable?(delegatee: string): Promise<bigint>
-  getDelegateeCommissionClaimable?(delegatee: string): Promise<bigint>
-
   // oracle_price_feeds contract — read-only price queries (issue #1488)
   getOraclePrice?(pair: string): Promise<OraclePriceReading>
   isOraclePriceStale?(pair: string): Promise<boolean>
-
-  // epoch_rewards contract — epoch-based staking rewards
-  epochStake?(user: string, amount: bigint): Promise<string>
-  epochUnstake?(user: string, amount: bigint): Promise<string>
-  epochClaim?(user: string): Promise<bigint>
-  epochGetClaimable?(user: string): Promise<bigint>
-  epochGetEpoch?(epochNumber: number): Promise<EpochInfo | null>
-  epochGetCurrentEpoch?(): Promise<number>
-  epochGetTotalStaked?(): Promise<bigint>
-  epochFundRewards?(caller: string, amount: bigint): Promise<string>
-  epochSeal?(caller: string, targetEpoch: number, nextEpochDurationSecs: number): Promise<string>
 
   // rent_wallet contract — custodial ledger for tenant rent balances
   rentWalletCredit?(account: string, amount: bigint): Promise<string>
@@ -411,36 +267,6 @@ export interface SorobanAdapter {
   depositBond?(inspector: string, amount: bigint): Promise<void>
   withdrawBond?(inspector: string, amount: bigint): Promise<void>
   getBondBalance?(inspector: string): Promise<bigint>
-
-  // ── governance contract — stake-weighted parameter voting (issue #1494) ────
-  //
-  // `create_proposal` and `vote` call `require_auth()` on the proposer/voter,
-  // so they cannot be signed with SOROBAN_ADMIN_SECRET on a user's behalf.
-  // These two methods therefore return an *unsigned* envelope for the user's
-  // own wallet to sign, which is then broadcast via submitGovernanceTransaction.
-  createProposal?(params: CreateGovernanceProposalParams): Promise<UnsignedTransaction>
-  vote?(params: GovernanceVoteParams): Promise<UnsignedTransaction>
-  /**
-   * Broadcast a transaction envelope that was signed client-side (by the
-   * connected wallet) and wait for confirmation. Needed to complete the
-   * user-signed half of the flow above; it authorizes nothing itself.
-   */
-  submitGovernanceTransaction?(signedXdr: string): Promise<{ txHash: string }>
-  /**
-   * `finalize_proposal` and `execute_proposal` take no Address argument and
-   * call no `require_auth()` on-chain — they are permissionless once their
-   * time conditions are met. The admin key here only pays the fee and submits.
-   */
-  finalizeProposal?(proposalId: number): Promise<string>
-  executeProposal?(proposalId: number): Promise<string>
-  getProposal?(proposalId: number): Promise<GovernanceProposal | null>
-  getProposalCount?(): Promise<number>
-
-  // vesting_schedule contract — linear vesting with cliff
-  createVestingSchedule?(beneficiary: string, totalAmount: bigint, startTime: number, endTime: number, cliffTime: number, revocable: boolean): Promise<string>
-  claimVested?(beneficiary: string): Promise<bigint>
-  revokeVesting?(beneficiary: string): Promise<bigint>
-  getClaimableVested?(beneficiary: string): Promise<bigint>
 
   // whistleblower_rewards contract — on-chain reward allocation and claiming
   allocateReward?(whistleblower: string, amount: bigint): Promise<string>

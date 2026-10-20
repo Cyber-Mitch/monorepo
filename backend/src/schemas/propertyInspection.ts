@@ -1,78 +1,76 @@
 import { z } from 'zod'
+import {
+  INSPECTION_CATEGORIES,
+  INSPECTION_RESULTS,
+} from '../services/inspectionTrustScore.js'
 
-export const inspectorVerificationStatusSchema = z.enum(['pending', 'verified', 'suspended'])
+/**
+ * Schemas for property inspections (#1904) and the minimal inspector
+ * verification endpoint (subset of #1902).
+ */
 
-export const createInspectorProfileSchema = z.object({
-  bio: z.string().optional(),
-  serviceAreas: z.array(z.string()).min(1, 'At least one service area is required'),
+export const inspectionIdParamSchema = z.object({
+  id: z.string().uuid('Inspection id must be a UUID'),
 })
 
-export const updateInspectorProfileSchema = z.object({
-  bio: z.string().optional(),
-  serviceAreas: z.array(z.string()).optional(),
+export const createInspectionSchema = z.object({
+  listingId: z.string().uuid().describe('Listing (whistleblower_listings.listing_id) to inspect'),
+  scheduledAt: z.coerce.date().describe('When the inspection is scheduled'),
 })
 
-export const inspectionStatusSchema = z.enum(['pending', 'in_progress', 'submitted', 'approved', 'rejected'])
+export type CreateInspectionRequest = z.infer<typeof createInspectionSchema>
 
-export const createPropertyInspectionSchema = z.object({
-  listingId: z.string().uuid('Invalid listing ID'),
-  inspectorId: z.string().uuid('Invalid inspector ID'),
-  scheduledAt: z.coerce.date().optional(),
+export const checklistItemSchema = z.object({
+  category: z.enum(INSPECTION_CATEGORIES),
+  item: z.string().trim().min(1).max(200),
+  result: z.enum(INSPECTION_RESULTS),
+  notes: z.string().max(2000).optional(),
 })
 
-export const updatePropertyInspectionSchema = z.object({
-  status: inspectionStatusSchema.optional(),
-  inspectorNotes: z.string().optional(),
+export const upsertChecklistSchema = z.object({
+  items: z.array(checklistItemSchema).min(1).max(200),
 })
 
-export const checklistCategorySchema = z.enum(['structural', 'plumbing', 'electrical', 'safety', 'exterior'])
+export type UpsertChecklistRequest = z.infer<typeof upsertChecklistSchema>
 
-export const checklistResultSchema = z.enum(['pass', 'fail', 'na'])
+export const INSPECTION_PHOTO_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+] as const
 
-export const createChecklistItemSchema = z.object({
-  inspectionId: z.string().uuid('Invalid inspection ID'),
-  category: checklistCategorySchema,
-  item: z.string().min(1, 'Item description is required'),
-  result: checklistResultSchema,
-  notes: z.string().optional(),
+export const presignInspectionPhotoSchema = z.object({
+  contentType: z.enum(INSPECTION_PHOTO_CONTENT_TYPES),
 })
 
-export const updateChecklistItemSchema = z.object({
-  result: checklistResultSchema.optional(),
-  notes: z.string().optional(),
+export const registerInspectionPhotoSchema = z.object({
+  objectKey: z.string().min(1).max(500),
+  caption: z.string().max(500).optional(),
+  takenAt: z.coerce.date().optional(),
 })
 
-export const createInspectionPhotoSchema = z.object({
-  inspectionId: z.string().uuid('Invalid inspection ID'),
-  url: z.string().url('Invalid photo URL'),
-  caption: z.string().optional(),
+export const submitInspectionSchema = z.object({
+  inspectorNotes: z.string().max(5000).optional(),
 })
 
-export const updateInspectionPhotoSchema = z.object({
-  caption: z.string().optional(),
+export const rejectInspectionSchema = z.object({
+  reason: z.string().trim().min(1, 'Rejection reason is required').max(1000),
 })
 
-export const submitReportSchema = z.object({
-  inspectionId: z.string().uuid('Invalid inspection ID'),
-  checklistItems: z.array(createChecklistItemSchema).min(1, 'At least one checklist item is required'),
-  photos: z.array(z.object({
-    url: z.string().url('Invalid photo URL'),
-    caption: z.string().optional(),
-  })).min(1, 'At least one photo is required'),
-  inspectorNotes: z.string().min(10, 'Inspector notes must be at least 10 characters'),
+export const listInspectionsQuerySchema = z.object({
+  status: z.enum(['pending', 'in_progress', 'submitted', 'approved', 'rejected']).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 })
 
-export const reviewInspectionSchema = z.object({
-  status: z.enum(['approved', 'rejected']),
-  rejectionReason: z.string().optional(),
-}).refine(
-  (data) => data.status !== 'rejected' || (data.rejectionReason && data.rejectionReason.length > 0),
-  {
-    message: 'Rejection reason is required when rejecting a report',
-    path: ['rejectionReason'],
-  }
-)
+export const listingIdParamSchema = z.object({
+  id: z.string().uuid('Listing id must be a UUID'),
+})
 
-export const inspectionSummarySchema = z.object({
-  propertyId: z.string().uuid('Invalid property ID'),
+export const inspectorUserIdParamSchema = z.object({
+  userId: z.string().min(1).max(200),
+})
+
+export const setInspectorVerificationSchema = z.object({
+  status: z.enum(['pending', 'verified', 'suspended']),
 })

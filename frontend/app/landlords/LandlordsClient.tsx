@@ -91,7 +91,7 @@ export default function LandlordsClient() {
 
     setPartnerSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/landlord/partner-application`, {
+      const res = await fetch(`${API_BASE}/api/v1/landlord/partner-application`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -103,11 +103,6 @@ export default function LandlordsClient() {
           propertyLocations: partnerForm.propertyLocations,
         }),
       });
-
-      if (res.status === 404) {
-        setPartnerSuccess(true);
-        return;
-      }
 
       const data = await res.json() as { error?: { message?: string }; message?: string };
 

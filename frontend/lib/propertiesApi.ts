@@ -33,6 +33,8 @@ export interface PropertyListing {
   outrightPriceNgn?: number;
   installmentBasePriceNgn?: number;
   hasApprovedInspection?: boolean;
+  /** Amenity keys (see lib/amenities.ts). Optional: not every listing payload includes them. */
+  amenities?: string[];
   description?: string;
   photos: string[];
   status: string;

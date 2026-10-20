@@ -5,7 +5,14 @@ import { validate } from '../middleware/validate.js'
 import { otpRequestRateLimit, otpVerifyRateLimit, refreshTokenRateLimit, walletAuthRateLimit } from '../middleware/authRateLimit.js'
 import { createRateLimiter } from '../middleware/rateLimiter.js'
 import { rateLimitProfiles } from '../config/rateLimitConfig.js'
-import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
+import {
+  requestOtpSchema,
+  verifyOtpSchema,
+  walletChallengeSchema,
+  walletVerifySchema,
+  sessionIdParamSchema,
+  revokeSessionsQuerySchema,
+} from '../schemas/auth.js'
 import { generateId, generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
 import { generateNonce, generateChallengeXdr, verifySignedChallenge, normalizeStellarAddress } from '../utils/wallet.js'
@@ -28,6 +35,7 @@ import {
   auditAuthLoginFailed,
   auditAuthLogout,
   auditAuthLogoutAll,
+  auditAuthSessionRevoked,
   auditAuthWalletChallengeIssued,
   auditAuthWalletLoginSuccess,
   auditAuthWalletLoginFailed,
@@ -88,7 +96,7 @@ async function issueSessionPair(
 ): Promise<string> {
   const accessToken = generateToken()
   const refreshToken = generateToken()
-  await sessionStore.create(user.email, accessToken, auditInfo)
+  await sessionStore.create(user.email, accessToken, auditInfo, family)
   await refreshTokenStore.create({
     userId: user.id,
     email: user.email,
@@ -291,6 +299,85 @@ router.post('/logout-all', authenticateToken, async (req: AuthenticatedRequest, 
   auditAuthLogoutAll(req, { userId: req.user!.id, sessionCount: count + refreshCount })
   res.json({ message: `Logged out from ${count + refreshCount} session(s)` })
 })
+
+function bearerToken(req: Request): string | undefined {
+  const header = req.headers.authorization
+  return header?.startsWith('Bearer ') ? header.slice(7) : undefined
+}
+
+/**
+ * GET /api/v1/auth/sessions
+ * Lists the caller's active sessions, one per device; `current` flags this one.
+ */
+router.get(
+  '/sessions',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const sessions = await sessionStore.listActiveSessions(req.user!.id, req.user!.email, bearerToken(req))
+      res.json({ sessions })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+/**
+ * DELETE /api/v1/auth/sessions?others=true
+ * Revokes the caller's other sessions ("log out other devices"). Without
+ * `others=true` every session, including this one, is revoked.
+ */
+router.delete(
+  '/sessions',
+  authenticateToken,
+  validate(revokeSessionsQuerySchema, 'query'),
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const others = req.query.others === 'true'
+      const { id: userId, email } = req.user!
+
+      let exceptSessionId: string | undefined
+      if (others) {
+        const sessions = await sessionStore.listActiveSessions(userId, email, bearerToken(req))
+        exceptSessionId = sessions.find((s) => s.current)?.id
+      }
+
+      const count = await sessionStore.revokeAllSessions(userId, email, { exceptSessionId })
+      if (!others) clearRefreshCookie(res)
+      auditAuthSessionRevoked(req, { userId, sessionCount: count, others })
+      res.json({ revoked: count })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+/**
+ * DELETE /api/v1/auth/sessions/:id
+ * Revokes one of the caller's own sessions. Another user's session id is a 404.
+ */
+router.delete(
+  '/sessions/:id',
+  authenticateToken,
+  validate(sessionIdParamSchema, 'params'),
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const { id: userId, email } = req.user!
+      const sessionId = req.params.id as string
+      const current = (await sessionStore.listActiveSessions(userId, email, bearerToken(req))).find((s) => s.current)
+
+      const revoked = await sessionStore.revokeSession(userId, email, sessionId)
+      if (!revoked) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Session not found')
+      }
+      if (current?.id === sessionId) clearRefreshCookie(res)
+      auditAuthSessionRevoked(req, { userId, sessionId })
+      res.json({ message: 'Session revoked' })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
 
 /**
  * GET /api/auth/me

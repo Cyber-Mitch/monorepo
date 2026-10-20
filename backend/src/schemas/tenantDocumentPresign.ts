@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { categorySchema } from './tenantDocument.js'
 
 export const documentDocTypeSchema = z.enum([
   'id_card',
@@ -12,6 +13,10 @@ export const documentDocTypeSchema = z.enum([
 export const uploadUrlRequestSchema = z.object({
   docType: documentDocTypeSchema,
   contentType: z.string().min(1).max(128),
+  /** Vault category shown on the documents page; derived from docType when omitted. */
+  category: categorySchema.optional(),
+  description: z.string().max(500).optional(),
+  dealId: z.string().max(128).optional(),
 })
 
 export const confirmUploadSchema = z.object({

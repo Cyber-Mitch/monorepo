@@ -25,12 +25,7 @@ import {
   RecordRentToOwnEquityPaymentParams,
   RentToOwnDealActionParams,
   OraclePriceReading,
-  DelegationRecord,
-  CreateGovernanceProposalParams,
-  GovernanceVoteParams,
-  GovernanceProposal,
-  GovernanceProposalStatus,
-  UnsignedTransaction,
+  TenantReputationRecord,
 } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
@@ -309,140 +304,6 @@ export class RealSorobanAdapter implements SorobanAdapter {
   // of these reads or writes touch the staking_pool position exposed by
   // getStakedBalance/getClaimableRewards.
   //
-  // Signer model: every write below is guarded on-chain by the *acting party's*
-  // require_auth() (delegator for delegate/undelegate, delegatee for the
-  // reward/commission calls) — not by the admin. Submitting through
-  // adminSigningService therefore only authorises when the platform admin key
-  // is itself the acting account, which is the same constraint the existing
-  // mvp_staking_pool wiring carries. The acting address is passed explicitly as
-  // the first contract argument, so a user-signed submission path can replace
-  // executeDelegationOperation without changing any caller.
-
-  private getStakeDelegationId(): string {
-    if (!this.config.stakeDelegationId) {
-      throw new ConfigurationError('SOROBAN_STAKE_DELEGATION_ID not configured')
-    }
-    return this.config.stakeDelegationId
-  }
-
-  private async executeDelegationOperation(
-    operation:
-      | 'delegate'
-      | 'request_undelegate'
-      | 'complete_undelegate'
-      | 'claim_delegatee_rewards'
-      | 'set_commission'
-      | 'claim_commission',
-    args: xdr.ScVal[],
-  ): Promise<string> {
-    const contractId = this.getStakeDelegationId()
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError(
-        `SOROBAN_ADMIN_SECRET not configured for stake_delegation ${operation}`,
-      )
-    }
-    return this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation,
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-  }
-
-  async delegateStake(delegator: string, delegatee: string, amount: bigint): Promise<string> {
-    return this.executeDelegationOperation('delegate', [
-      nativeToScVal(Address.fromString(delegator)),
-      nativeToScVal(Address.fromString(delegatee)),
-      nativeToScVal(amount, { type: 'i128' }),
-    ])
-  }
-
-  async requestUndelegate(delegator: string, delegatee: string, amount: bigint): Promise<string> {
-    return this.executeDelegationOperation('request_undelegate', [
-      nativeToScVal(Address.fromString(delegator)),
-      nativeToScVal(Address.fromString(delegatee)),
-      nativeToScVal(amount, { type: 'i128' }),
-    ])
-  }
-
-  async completeUndelegate(delegator: string, delegatee: string): Promise<string> {
-    return this.executeDelegationOperation('complete_undelegate', [
-      nativeToScVal(Address.fromString(delegator)),
-      nativeToScVal(Address.fromString(delegatee)),
-    ])
-  }
-
-  async claimDelegateeRewards(delegatee: string): Promise<string> {
-    return this.executeDelegationOperation('claim_delegatee_rewards', [
-      nativeToScVal(Address.fromString(delegatee)),
-    ])
-  }
-
-  async setDelegateeCommission(delegatee: string, rateBps: number): Promise<string> {
-    return this.executeDelegationOperation('set_commission', [
-      nativeToScVal(Address.fromString(delegatee)),
-      nativeToScVal(rateBps, { type: 'u32' }),
-    ])
-  }
-
-  async claimDelegateeCommission(delegatee: string): Promise<string> {
-    return this.executeDelegationOperation('claim_commission', [
-      nativeToScVal(Address.fromString(delegatee)),
-    ])
-  }
-
-  async getDelegations(delegator: string): Promise<DelegationRecord[]> {
-    const retval = await this.invokeReadOnly(this.getStakeDelegationId(), 'get_delegations', [
-      nativeToScVal(Address.fromString(delegator)),
-    ])
-    const native = scValToNative(retval) as Array<{
-      delegatee: string
-      amount: bigint | number | string
-      activated_epoch: bigint | number | string
-    }>
-    return (native ?? []).map((row) => ({
-      delegatee: String(row.delegatee),
-      amount: BigInt(row.amount),
-      activatedEpoch: Number(row.activated_epoch),
-    }))
-  }
-
-  async getDelegationStakedBalance(account: string): Promise<bigint> {
-    const retval = await this.invokeReadOnly(this.getStakeDelegationId(), 'staked_balance', [
-      nativeToScVal(Address.fromString(account)),
-    ])
-    return BigInt(scValToNative(retval))
-  }
-
-  async getDelegationEpoch(): Promise<number> {
-    const retval = await this.invokeReadOnly(
-      this.getStakeDelegationId(),
-      'current_epoch_num',
-      [],
-    )
-    return Number(scValToNative(retval))
-  }
-
-  async getDelegateeClaimable(delegatee: string): Promise<bigint> {
-    const retval = await this.invokeReadOnly(
-      this.getStakeDelegationId(),
-      'get_delegatee_claimable',
-      [nativeToScVal(Address.fromString(delegatee))],
-    )
-    return BigInt(scValToNative(retval))
-  }
-
-  async getDelegateeCommissionClaimable(delegatee: string): Promise<bigint> {
-    const retval = await this.invokeReadOnly(
-      this.getStakeDelegationId(),
-      'get_commission_claimable',
-      [nativeToScVal(Address.fromString(delegatee))],
-    )
-    return BigInt(scValToNative(retval))
-  }
-
   /**
    * Record a receipt on-chain.
    * 
@@ -1704,6 +1565,113 @@ export class RealSorobanAdapter implements SorobanAdapter {
     })
   }
 
+  /**
+   * Admin/operator operation: tenant_reputation `update_reputation`.
+   * ABI: update_reputation(admin: Address, tenant_id: String, composite_score: u32,
+   *   payment_score: u32, property_care_score: u32, communication_score: u32,
+   *   total_ratings: u32). `record.lastUpdated` is ignored; the contract stamps it.
+   */
+  async updateTenantReputation(tenantId: string, record: TenantReputationRecord): Promise<void> {
+    return tracer.startActiveSpan('RealSorobanAdapter.updateTenantReputation', async (span) => {
+      span.setAttribute('soroban.tenant_id', tenantId)
+      const contractId = this.config.tenantReputationId
+      try {
+        if (!contractId) {
+          throw new ConfigurationError('SOROBAN_TENANT_REPUTATION_ID not configured for tenant reputation update')
+        }
+        if (!this.config.adminSecret) {
+          throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for tenant reputation update')
+        }
+
+        const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
+        const args: xdr.ScVal[] = [
+          nativeToScVal(new Address(adminAddress)),
+          nativeToScVal(tenantId, { type: 'string' }),
+          nativeToScVal(record.compositeScore, { type: 'u32' }),
+          nativeToScVal(record.paymentScore, { type: 'u32' }),
+          nativeToScVal(record.propertyCareScore, { type: 'u32' }),
+          nativeToScVal(record.communicationScore, { type: 'u32' }),
+          nativeToScVal(record.totalRatings, { type: 'u32' }),
+        ]
+
+        await this.adminSigningService.executeAdminOperation({
+          contractId,
+          operation: 'update_reputation',
+          args,
+          networkPassphrase: this.config.networkPassphrase,
+          adminSecret: this.config.adminSecret,
+          server: this.server,
+        })
+
+        logger.info('Tenant reputation updated on-chain', {
+          tenantId,
+          compositeScore: record.compositeScore,
+        })
+        span.setStatus({ code: SpanStatusCode.OK })
+      } catch (err) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (err instanceof SorobanError) throw err
+        throw new ContractError(
+          `Failed to update tenant reputation for ${tenantId}`,
+          contractId ?? 'unknown',
+          'update_reputation',
+          err,
+        )
+      } finally {
+        span.end()
+      }
+    })
+  }
+
+  /**
+   * Read-only: tenant_reputation `get_reputation(tenant_id: String) -> Option<TenantReputation>`.
+   * Returns null when the tenant has no on-chain record.
+   */
+  async getTenantReputation(tenantId: string): Promise<TenantReputationRecord | null> {
+    return tracer.startActiveSpan('RealSorobanAdapter.getTenantReputation', async (span) => {
+      span.setAttribute('soroban.tenant_id', tenantId)
+      const contractId = this.config.tenantReputationId
+      try {
+        if (!contractId) {
+          throw new ConfigurationError('SOROBAN_TENANT_REPUTATION_ID not configured for get_reputation')
+        }
+
+        const result = await this.invokeReadOnly(contractId, 'get_reputation', [
+          nativeToScVal(tenantId, { type: 'string' }),
+        ])
+        const native = result ? (scValToNative(result) as Record<string, unknown> | null | undefined) : null
+        if (!native || typeof native !== 'object') {
+          span.setStatus({ code: SpanStatusCode.OK })
+          return null
+        }
+
+        const record: TenantReputationRecord = {
+          compositeScore: Number(native.composite_score ?? 0),
+          paymentScore: Number(native.payment_score ?? 0),
+          propertyCareScore: Number(native.property_care_score ?? 0),
+          communicationScore: Number(native.communication_score ?? 0),
+          totalRatings: Number(native.total_ratings ?? 0),
+          lastUpdated: BigInt((native.last_updated as bigint | number | string | undefined) ?? 0),
+        }
+        span.setStatus({ code: SpanStatusCode.OK })
+        return record
+      } catch (err) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (err instanceof SorobanError) throw err
+        throw new ContractError(
+          `Failed to get tenant reputation for ${tenantId}`,
+          contractId ?? 'unknown',
+          'get_reputation',
+          err,
+        )
+      } finally {
+        span.end()
+      }
+    })
+  }
+
   /** Admin operation: rent_to_own `record_equity_payment`. */
   async recordRentToOwnEquityPayment(params: RecordRentToOwnEquityPaymentParams): Promise<void> {
     const contractId = this.config.rentToOwnId
@@ -2247,138 +2215,6 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
   // Upgradeable proxy governance methods
 
-  async proposeUpgrade(newWasmHash: string): Promise<string> {
-    const contractId = this.config.upgradeableProxyId
-    if (!contractId) {
-      throw new ConfigurationError('SOROBAN_UPGRADEABLE_PROXY_ID not configured for upgrade proposal')
-    }
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for upgrade proposal')
-    }
-
-    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-    const wasmHashBytes = Buffer.from(newWasmHash, 'hex')
-    const args: xdr.ScVal[] = [
-      nativeToScVal(new Address(adminAddress)),
-      nativeToScVal(wasmHashBytes, { type: 'bytes' }),
-    ]
-
-    const txHash = await this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'propose_upgrade',
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-
-    logger.info('Upgrade proposed on-chain', { wasmHash: newWasmHash })
-    return txHash
-  }
-
-  async confirmUpgrade(newWasmHash: string): Promise<string> {
-    const contractId = this.config.upgradeableProxyId
-    if (!contractId) {
-      throw new ConfigurationError('SOROBAN_UPGRADEABLE_PROXY_ID not configured for upgrade confirmation')
-    }
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for upgrade confirmation')
-    }
-
-    const approverAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-    const wasmHashBytes = Buffer.from(newWasmHash, 'hex')
-    const args: xdr.ScVal[] = [
-      nativeToScVal(new Address(approverAddress)),
-      nativeToScVal(wasmHashBytes, { type: 'bytes' }),
-    ]
-
-    const txHash = await this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'confirm_upgrade',
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-
-    logger.info('Upgrade confirmed on-chain', { wasmHash: newWasmHash })
-    return txHash
-  }
-
-  async cancelUpgrade(): Promise<string> {
-    const contractId = this.config.upgradeableProxyId
-    if (!contractId) {
-      throw new ConfigurationError('SOROBAN_UPGRADEABLE_PROXY_ID not configured for upgrade cancellation')
-    }
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for upgrade cancellation')
-    }
-
-    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-    const args: xdr.ScVal[] = [
-      nativeToScVal(new Address(adminAddress)),
-    ]
-
-    const txHash = await this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'cancel_upgrade',
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-
-    logger.info('Upgrade cancelled on-chain')
-    return txHash
-  }
-
-  async transferAdmin(newAdminAddress: string): Promise<string> {
-    const contractId = this.config.upgradeableProxyId
-    if (!contractId) {
-      throw new ConfigurationError('SOROBAN_UPGRADEABLE_PROXY_ID not configured for admin transfer')
-    }
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for admin transfer')
-    }
-
-    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-    const args: xdr.ScVal[] = [
-      nativeToScVal(new Address(adminAddress)),
-      nativeToScVal(new Address(newAdminAddress)),
-    ]
-
-    const txHash = await this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'transfer_admin',
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-
-    logger.info('Admin transferred on-chain', { newAdmin: newAdminAddress })
-    return txHash
-  }
-
-  async hasPendingUpgrade(): Promise<boolean> {
-    const contractId = this.config.upgradeableProxyId
-    if (!contractId) {
-      throw new ConfigurationError('SOROBAN_UPGRADEABLE_PROXY_ID not configured for pending upgrade check')
-    }
-
-    try {
-      const result = await this.invokeReadOnly(contractId, 'has_pending_upgrade', [])
-      return Boolean(scValToNative(result))
-    } catch (err: any) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        'Failed to check pending upgrade status',
-        contractId,
-        'has_pending_upgrade',
-        err
-      )
-    }
-  }
   /**
    * Read the current price for `pair` from the oracle_price_feeds contract.
    * The contract's `get_price` itself reverts with `PriceTooStale` (and other
@@ -2680,385 +2516,6 @@ export class RealSorobanAdapter implements SorobanAdapter {
   }
 
   // ── epoch_rewards contract methods ────────────────────────────────────────
-
-  async epochStake(user: string, amount: bigint): Promise<string> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochStake', async (span) => {
-      span.setAttribute('soroban.user', user)
-      span.setAttribute('soroban.amount', amount.toString())
-
-      if (!this.config.epochRewardsId) {
-        const err = new ConfigurationError('SOROBAN_EPOCH_REWARDS_ID not configured')
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
-        span.recordException(err)
-        span.end()
-        throw err
-      }
-
-      try {
-        const txHash = await this.adminSigningService.executeAdminOperation({
-          contractId: this.config.epochRewardsId,
-          operation: 'stake',
-          args: [
-            nativeToScVal(new Address(user)),
-            nativeToScVal(amount, { type: 'i128' }),
-          ],
-          networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret!,
-          server: this.server,
-        })
-
-        span.setStatus({ code: SpanStatusCode.OK })
-        return txHash
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to stake ${amount} for ${user}`,
-          this.config.epochRewardsId,
-          'stake',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochUnstake(user: string, amount: bigint): Promise<string> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochUnstake', async (span) => {
-      span.setAttribute('soroban.user', user)
-      span.setAttribute('soroban.amount', amount.toString())
-
-      if (!this.config.epochRewardsId) {
-        const err = new ConfigurationError('SOROBAN_EPOCH_REWARDS_ID not configured')
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
-        span.recordException(err)
-        span.end()
-        throw err
-      }
-
-      try {
-        const txHash = await this.adminSigningService.executeAdminOperation({
-          contractId: this.config.epochRewardsId,
-          operation: 'unstake',
-          args: [
-            nativeToScVal(new Address(user)),
-            nativeToScVal(amount, { type: 'i128' }),
-          ],
-          networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret!,
-          server: this.server,
-        })
-
-        span.setStatus({ code: SpanStatusCode.OK })
-        return txHash
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to unstake ${amount} for ${user}`,
-          this.config.epochRewardsId,
-          'unstake',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochClaim(user: string): Promise<bigint> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochClaim', async (span) => {
-      span.setAttribute('soroban.user', user)
-
-      if (!this.config.epochRewardsId) {
-        const err = new ConfigurationError('SOROBAN_EPOCH_REWARDS_ID not configured')
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
-        span.recordException(err)
-        span.end()
-        throw err
-      }
-
-      try {
-        const txHash = await this.adminSigningService.executeAdminOperation({
-          contractId: this.config.epochRewardsId,
-          operation: 'claim',
-          args: [nativeToScVal(new Address(user))],
-          networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret!,
-          server: this.server,
-        })
-
-        // The claim function returns the claimed amount, but executeAdminOperation only returns txHash
-        // We need to query the result separately or return the txHash for now
-        // For MVP, return the txHash and let the caller query get_claimable separately
-        span.setStatus({ code: SpanStatusCode.OK })
-        return BigInt(0) // TODO: Parse result from transaction events
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to claim rewards for ${user}`,
-          this.config.epochRewardsId,
-          'claim',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochGetClaimable(user: string): Promise<bigint> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochGetClaimable', async (span) => {
-      span.setAttribute('soroban.user', user)
-
-      if (!this.config.epochRewardsId) {
-        span.setStatus({ code: SpanStatusCode.OK })
-        return BigInt(0)
-      }
-
-      try {
-        const result = await this.invokeReadOnly(
-          this.config.epochRewardsId,
-          'get_claimable',
-          [nativeToScVal(new Address(user))]
-        )
-
-        const claimable = BigInt(scValToNative(result) as number)
-        span.setAttribute('soroban.claimable', claimable.toString())
-        span.setStatus({ code: SpanStatusCode.OK })
-        return claimable
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to get claimable rewards for ${user}`,
-          this.config.epochRewardsId,
-          'get_claimable',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochGetEpoch(epochNumber: number): Promise<import('./adapter.js').EpochInfo | null> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochGetEpoch', async (span) => {
-      span.setAttribute('soroban.epoch_number', epochNumber)
-
-      if (!this.config.epochRewardsId) {
-        span.setStatus({ code: SpanStatusCode.OK })
-        return null
-      }
-
-      try {
-        const result = await this.invokeReadOnly(
-          this.config.epochRewardsId,
-          'get_epoch',
-          [nativeToScVal(epochNumber)]
-        )
-
-        if (!result) {
-          span.setStatus({ code: SpanStatusCode.OK })
-          return null
-        }
-
-        const epoch = scValToNative(result) as any
-        const normalized: import('./adapter.js').EpochInfo = {
-          epoch_number: typeof epoch?.epoch_number === 'number' ? epoch.epoch_number : 0,
-          start_ts: typeof epoch?.start_ts === 'number' ? epoch.start_ts : 0,
-          duration_secs: typeof epoch?.duration_secs === 'number' ? epoch.duration_secs : 0,
-          end_ts: typeof epoch?.end_ts === 'number' ? epoch.end_ts : 0,
-          seal_ts: typeof epoch?.seal_ts === 'number' ? epoch.seal_ts : 0,
-          sealed: typeof epoch?.sealed === 'boolean' ? epoch.sealed : false,
-          total_rewards: BigInt(epoch?.total_rewards ?? 0),
-          carried_forward: BigInt(epoch?.carried_forward ?? 0),
-          reward_index_at_seal: BigInt(epoch?.reward_index_at_seal ?? 0),
-          dust: BigInt(epoch?.dust ?? 0),
-          total_claimable_at_seal: BigInt(epoch?.total_claimable_at_seal ?? 0),
-        }
-
-        span.setStatus({ code: SpanStatusCode.OK })
-        return normalized
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to get epoch ${epochNumber}`,
-          this.config.epochRewardsId,
-          'get_epoch',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochGetCurrentEpoch(): Promise<number> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochGetCurrentEpoch', async (span) => {
-      if (!this.config.epochRewardsId) {
-        span.setStatus({ code: SpanStatusCode.OK })
-        return 1
-      }
-
-      try {
-        const result = await this.invokeReadOnly(
-          this.config.epochRewardsId,
-          'current_epoch',
-          []
-        )
-
-        const epochNumber = scValToNative(result) as number
-        span.setAttribute('soroban.current_epoch', epochNumber)
-        span.setStatus({ code: SpanStatusCode.OK })
-        return epochNumber
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          'Failed to get current epoch',
-          this.config.epochRewardsId,
-          'current_epoch',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochGetTotalStaked(): Promise<bigint> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochGetTotalStaked', async (span) => {
-      if (!this.config.epochRewardsId) {
-        span.setStatus({ code: SpanStatusCode.OK })
-        return BigInt(0)
-      }
-
-      try {
-        const result = await this.invokeReadOnly(
-          this.config.epochRewardsId,
-          'total_staked',
-          []
-        )
-
-        const total = BigInt(scValToNative(result) as number)
-        span.setAttribute('soroban.total_staked', total.toString())
-        span.setStatus({ code: SpanStatusCode.OK })
-        return total
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          'Failed to get total staked',
-          this.config.epochRewardsId,
-          'total_staked',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochFundRewards(caller: string, amount: bigint): Promise<string> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochFundRewards', async (span) => {
-      span.setAttribute('soroban.caller', caller)
-      span.setAttribute('soroban.amount', amount.toString())
-
-      if (!this.config.epochRewardsId) {
-        const err = new ConfigurationError('SOROBAN_EPOCH_REWARDS_ID not configured')
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
-        span.recordException(err)
-        span.end()
-        throw err
-      }
-
-      try {
-        const txHash = await this.adminSigningService.executeAdminOperation({
-          contractId: this.config.epochRewardsId,
-          operation: 'fund_epoch_rewards',
-          args: [
-            nativeToScVal(new Address(caller)),
-            nativeToScVal(amount, { type: 'i128' }),
-          ],
-          networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret!,
-          server: this.server,
-        })
-
-        span.setStatus({ code: SpanStatusCode.OK })
-        return txHash
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to fund epoch rewards with ${amount}`,
-          this.config.epochRewardsId,
-          'fund_epoch_rewards',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
-
-  async epochSeal(caller: string, targetEpoch: number, nextEpochDurationSecs: number): Promise<string> {
-    return tracer.startActiveSpan('RealSorobanAdapter.epochSeal', async (span) => {
-      span.setAttribute('soroban.caller', caller)
-      span.setAttribute('soroban.target_epoch', targetEpoch)
-      span.setAttribute('soroban.next_duration_secs', nextEpochDurationSecs)
-
-      if (!this.config.epochRewardsId) {
-        const err = new ConfigurationError('SOROBAN_EPOCH_REWARDS_ID not configured')
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
-        span.recordException(err)
-        span.end()
-        throw err
-      }
-
-      try {
-        const txHash = await this.adminSigningService.executeAdminOperation({
-          contractId: this.config.epochRewardsId,
-          operation: 'seal_epoch',
-          args: [
-            nativeToScVal(new Address(caller)),
-            nativeToScVal(targetEpoch),
-            nativeToScVal(nextEpochDurationSecs),
-          ],
-          networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret!,
-          server: this.server,
-        })
-
-        span.setStatus({ code: SpanStatusCode.OK })
-        return txHash
-      } catch (err) {
-        span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) })
-        if (err instanceof Error) span.recordException(err)
-        if (err instanceof SorobanError) throw err
-        throw new ContractError(
-          `Failed to seal epoch ${targetEpoch}`,
-          this.config.epochRewardsId,
-          'seal_epoch',
-          err
-        )
-      } finally {
-        span.end()
-      }
-    })
-  }
 
   // ── rent_wallet contract ─────────────────────────────────────────────────────
 
@@ -3537,368 +2994,6 @@ export class RealSorobanAdapter implements SorobanAdapter {
     })
   }
 
-  // ── governance contract (issue #1494) ──────────────────────────────────────
-
-  private requireGovernanceId(): string {
-    if (!this.config.governanceId) {
-      throw new ConfigurationError('SOROBAN_GOVERNANCE_ID not configured')
-    }
-    return this.config.governanceId
-  }
-
-  /**
-   * Build an *unsigned* `create_proposal` envelope whose source account is the
-   * proposer's own Stellar address.
-   *
-   * The contract calls `proposer.require_auth()`, so the authorization must come
-   * from the proposer's own signature. Every other write in this codebase is
-   * signed with SOROBAN_ADMIN_SECRET, which cannot satisfy that check — hence
-   * the prepare/sign/submit split: the connected wallet signs this XDR
-   * client-side and posts it back to `submitGovernanceTransaction`.
-   */
-  async createProposal(
-    params: CreateGovernanceProposalParams,
-  ): Promise<UnsignedTransaction> {
-    const contractId = this.requireGovernanceId()
-    return this.buildUnsignedGovernanceTx(
-      contractId,
-      params.proposer,
-      'create_proposal',
-      [
-        nativeToScVal(Address.fromString(params.proposer)),
-        nativeToScVal(params.paramKey, { type: 'symbol' }),
-        nativeToScVal(params.currentValue, { type: 'i128' }),
-        nativeToScVal(params.proposedValue, { type: 'i128' }),
-      ],
-    )
-  }
-
-  /** Build an *unsigned* `vote` envelope sourced from the voter's address. */
-  async vote(params: GovernanceVoteParams): Promise<UnsignedTransaction> {
-    const contractId = this.requireGovernanceId()
-    return this.buildUnsignedGovernanceTx(contractId, params.voter, 'vote', [
-      nativeToScVal(Address.fromString(params.voter)),
-      nativeToScVal(params.proposalId, { type: 'u64' }),
-      nativeToScVal(params.support, { type: 'bool' }),
-    ])
-  }
-
-  private async buildUnsignedGovernanceTx(
-    contractId: string,
-    sourceAccount: string,
-    method: string,
-    args: xdr.ScVal[],
-  ): Promise<UnsignedTransaction> {
-    return tracer.startActiveSpan(
-      `RealSorobanAdapter.buildUnsignedGovernanceTx:${method}`,
-      async (span: Span) => {
-        span.setAttribute('soroban.contract_id', contractId)
-        span.setAttribute('soroban.method', method)
-        try {
-          // The user's own account supplies the sequence number — no admin
-          // sequence allocation is involved because we never sign this tx.
-          const account = await this.server.getAccount(sourceAccount)
-
-          const tx = new TransactionBuilder(account, {
-            fee: BASE_FEE,
-            networkPassphrase: this.config.networkPassphrase,
-          })
-            .addOperation(
-              Operation.invokeHostFunction({
-                func: xdr.HostFunction.hostFunctionTypeInvokeContract(
-                  new xdr.InvokeContractArgs({
-                    contractAddress: Address.fromString(contractId).toScAddress(),
-                    functionName: method,
-                    args,
-                  }),
-                ),
-                auth: [],
-              }),
-            )
-            .setTimeout(300)
-            .build()
-
-          // Simulate + assemble so the envelope carries its Soroban footprint
-          // and resource fee. The wallet signs exactly once, so the tx must
-          // already be complete at signing time.
-          const prepared = await this.server.prepareTransaction(tx)
-
-          span.setStatus({ code: SpanStatusCode.OK })
-          return { xdr: prepared.toXDR() }
-        } catch (err: any) {
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: err?.message || String(err),
-          })
-          if (err instanceof Error) span.recordException(err)
-          if (err instanceof SorobanError) throw err
-          throw new ContractError(
-            `Failed to build unsigned ${method} transaction`,
-            contractId,
-            method,
-            err,
-          )
-        } finally {
-          span.end()
-        }
-      },
-    )
-  }
-
-  /**
-   * Broadcast a wallet-signed envelope and wait for it to be applied.
-   * Beyond the issue's literal method list, but required to complete the
-   * user-signed flow started by createProposal/vote.
-   */
-  async submitGovernanceTransaction(signedXdr: string): Promise<{ txHash: string }> {
-    return tracer.startActiveSpan(
-      'RealSorobanAdapter.submitGovernanceTransaction',
-      async (span: Span) => {
-        const contractId = this.requireGovernanceId()
-        try {
-          let tx
-          try {
-            tx = TransactionBuilder.fromXDR(signedXdr, this.config.networkPassphrase)
-          } catch (err) {
-            throw new TransactionError(
-              'Signed transaction envelope could not be parsed',
-              undefined,
-              'submit_governance_transaction',
-              err,
-            )
-          }
-
-          const response = await this.server.sendTransaction(tx)
-          span.setAttribute('soroban.tx_hash', response.hash)
-
-          if (response.status !== 'PENDING') {
-            throw new TransactionError(
-              `Governance transaction rejected with status: ${response.status}`,
-              response.hash,
-              'submit_governance_transaction',
-            )
-          }
-
-          const confirmed = await this.waitForGovernanceTransaction(response.hash)
-          if (!confirmed) {
-            throw new TransactionError(
-              'Governance transaction not confirmed within timeout',
-              response.hash,
-              'submit_governance_transaction',
-            )
-          }
-          if (confirmed !== 'SUCCESS') {
-            throw new TransactionError(
-              `Governance transaction failed: ${confirmed}`,
-              response.hash,
-              'submit_governance_transaction',
-            )
-          }
-
-          span.setStatus({ code: SpanStatusCode.OK })
-          return { txHash: response.hash }
-        } catch (err: any) {
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: err?.message || String(err),
-          })
-          if (err instanceof Error) span.recordException(err)
-          if (err instanceof SorobanError) throw err
-          throw new ContractError(
-            'Failed to submit signed governance transaction',
-            contractId,
-            'submit_governance_transaction',
-            err,
-          )
-        } finally {
-          span.end()
-        }
-      },
-    )
-  }
-
-  private async waitForGovernanceTransaction(
-    txHash: string,
-    maxAttempts = 30,
-    pollIntervalMs = 1000,
-  ): Promise<string | null> {
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, pollIntervalMs))
-      try {
-        const result = await this.server.getTransaction(txHash)
-        if (result.status === 'SUCCESS' || result.status === 'FAILED') {
-          return result.status
-        }
-      } catch (err) {
-        if (isTransientRpcError(err)) continue
-        throw err
-      }
-    }
-    return null
-  }
-
-  /**
-   * `finalize_proposal(proposal_id)` is permissionless on-chain — it takes no
-   * Address and calls no `require_auth()`. Anyone (including a bot) may call it
-   * once the voting period has elapsed; the admin key here is only a fee payer.
-   */
-  async finalizeProposal(proposalId: number): Promise<string> {
-    const contractId = this.requireGovernanceId()
-    return this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'finalize_proposal',
-      args: [nativeToScVal(proposalId, { type: 'u64' })],
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret!,
-      server: this.server,
-    })
-  }
-
-  /** Permissionless on-chain, same as finalizeProposal. */
-  async executeProposal(proposalId: number): Promise<string> {
-    const contractId = this.requireGovernanceId()
-    return this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'execute_proposal',
-      args: [nativeToScVal(proposalId, { type: 'u64' })],
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret!,
-      server: this.server,
-    })
-  }
-
-  async getProposal(proposalId: number): Promise<GovernanceProposal | null> {
-    const contractId = this.requireGovernanceId()
-    try {
-      const retval = await this.invokeReadOnly(contractId, 'get_proposal', [
-        nativeToScVal(proposalId, { type: 'u64' }),
-      ])
-      const native = scValToNative(retval)
-      if (native === null || native === undefined) return null
-      return normalizeGovernanceProposal(native)
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        `Failed to read governance proposal ${proposalId}`,
-        contractId,
-        'get_proposal',
-        err,
-      )
-    }
-  }
-
-  async getProposalCount(): Promise<number> {
-    const contractId = this.requireGovernanceId()
-    try {
-      const retval = await this.invokeReadOnly(contractId, 'proposal_count', [])
-      return Number(scValToNative(retval) ?? 0)
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        'Failed to read governance proposal count',
-        contractId,
-        'proposal_count',
-        err,
-      )
-    }
-  }
-
-  // ── vesting_schedule contract ─────────────────────────────────────────────
-  
-  private getVestingScheduleId(): string {
-    if (!this.config.vestingScheduleId) {
-      throw new ConfigurationError('SOROBAN_VESTING_SCHEDULE_ID not configured')
-    }
-    return this.config.vestingScheduleId
-  }
-
-  async createVestingSchedule(
-    beneficiary: string,
-    totalAmount: bigint,
-    startTime: number,
-    endTime: number,
-    cliffTime: number,
-    revocable: boolean
-  ): Promise<string> {
-    const contractId = this.getVestingScheduleId()
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for vesting schedule creation')
-    }
-
-    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-    const args: xdr.ScVal[] = [
-      nativeToScVal(new Address(adminAddress)),
-      nativeToScVal(new Address(beneficiary)),
-      nativeToScVal(totalAmount, { type: 'i128' }),
-      nativeToScVal(startTime, { type: 'u64' }),
-      nativeToScVal(endTime, { type: 'u64' }),
-      nativeToScVal(cliffTime, { type: 'u64' }),
-      nativeToScVal(revocable),
-    ]
-
-    return this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'create_vesting_schedule',
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-  }
-
-  async claimVested(beneficiary: string): Promise<bigint> {
-    // Note: The contract requires beneficiary auth (beneficiary.require_auth())
-    // This means we cannot use admin signing for this operation.
-    // In a full implementation, this would need to return an unsigned transaction
-    // for the beneficiary's wallet to sign, similar to the governance voting pattern.
-    // For now, we'll return the claimable amount as a read-only operation.
-    return this.getClaimableVested(beneficiary)
-  }
-
-  async revokeVesting(beneficiary: string): Promise<bigint> {
-    const contractId = this.getVestingScheduleId()
-    if (!this.config.adminSecret) {
-      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for vesting schedule revocation')
-    }
-
-    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-    const args: xdr.ScVal[] = [
-      nativeToScVal(new Address(adminAddress)),
-      nativeToScVal(new Address(beneficiary)),
-    ]
-
-    const result = await this.adminSigningService.executeAdminOperation({
-      contractId,
-      operation: 'revoke',
-      args,
-      networkPassphrase: this.config.networkPassphrase,
-      adminSecret: this.config.adminSecret,
-      server: this.server,
-    })
-
-    // The revoke function returns the unclaimed amount
-    // We need to parse this from the result or query separately
-    return BigInt(0) // Placeholder - actual implementation would parse the result
-  }
-
-  async getClaimableVested(beneficiary: string): Promise<bigint> {
-    const contractId = this.getVestingScheduleId()
-    try {
-      const result = await this.invokeReadOnly(contractId, 'get_claimable_amount', [
-        nativeToScVal(new Address(beneficiary)),
-      ])
-      return BigInt(scValToNative(result) as number)
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        `Failed to get claimable vested amount for ${beneficiary}`,
-        contractId,
-        'get_claimable_amount',
-        err,
-      )
-    }
-  }
-
   // ── whistleblower_rewards contract ───────────────────────────────────────────
   
   private getWhistleblowerRewardsId(): string {
@@ -4169,31 +3264,3 @@ export class RealSorobanAdapter implements SorobanAdapter {
   }
 }
 
-/**
- * Convert the snake_cased, i128-bearing `Proposal` struct returned by
- * `scValToNative` into the camelCased, JSON-safe shape the API exposes.
- * i128 fields become decimal strings so large values keep full precision.
- */
-export function normalizeGovernanceProposal(native: any): GovernanceProposal {
-  const asString = (v: unknown): string =>
-    v === null || v === undefined ? '0' : BigInt(v as any).toString()
-
-  // `scValToNative` renders a unit-variant enum such as ProposalStatus either
-  // as a bare string or as a single-element array of the variant name.
-  const rawStatus = Array.isArray(native?.status) ? native.status[0] : native?.status
-  const status = String(rawStatus ?? 'Active') as GovernanceProposalStatus
-
-  return {
-    id: Number(native?.id ?? 0),
-    proposer: String(native?.proposer ?? ''),
-    paramKey: String(native?.param_key ?? ''),
-    currentValue: asString(native?.current_value),
-    proposedValue: asString(native?.proposed_value),
-    votesFor: asString(native?.votes_for),
-    votesAgainst: asString(native?.votes_against),
-    status,
-    createdAt: Number(native?.created_at ?? 0),
-    votingEndsAt: Number(native?.voting_ends_at ?? 0),
-    snapshottedTotalStaked: asString(native?.snapshotted_total_staked),
-  }
-}

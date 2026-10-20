@@ -1,349 +1,199 @@
-/**
- * tenantDataExportService.test.ts
- * PR #1215 — export completeness, cross-tenant scoping, field safety, empty export.
- *
- * The service calls the module-level `dataExportRepository` singleton directly.
- * We mock that module and swap in a fresh in-memory DataExportRepository
- * instance per describe block so tests are fully isolated.
- */
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { DataExportRepository } from '../repositories/DataExportRepository.js'
-
-vi.mock('../utils/logger.js', () => ({
-  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+const storage = vi.hoisted(() => ({
+  uploadFile: vi.fn(),
+  deleteFile: vi.fn(),
+  generatePresignedDownload: vi.fn(),
 }))
+vi.mock('./storageService.js', () => storage)
 
-// We mock the repository module so we can swap the singleton per test.
-// The factory fn returns a fresh instance; we replace it each time we need isolation.
-let activeRepo: DataExportRepository
+import {
+  InMemoryTenantDataExportStore,
+  type TenantDataExportStore,
+} from '../models/tenantDataExportStore.js'
+import { userStore } from '../models/authStore.js'
+import {
+  buildExportFiles,
+  defaultExportSources,
+  expireTenantDataExports,
+  exportStorageKey,
+  generateTenantDataExport,
+  EXPORT_ARCHIVE_TTL_MS,
+  type ExportSources,
+} from './tenantDataExportService.js'
 
-vi.mock('../repositories/DataExportRepository.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../repositories/DataExportRepository.js')>()
+function fakeSources(overrides: Partial<ExportSources> = {}): ExportSources {
   return {
-    ...actual,
-    // Proxy every call through `activeRepo` so tests can swap it freely
-    dataExportRepository: {
-      createJob: (...a: any[]) => activeRepo.createJob(...a),
-      getJob: (...a: any[]) => activeRepo.getJob(...a),
-      getJobByIdForUser: (...a: any[]) => activeRepo.getJobByIdForUser(...a),
-      updateJob: (...a: any[]) => activeRepo.updateJob(...a),
-      markExpiredJobs: (...a: any[]) => activeRepo.markExpiredJobs(...a),
-    },
+    getProfile: async () => ({ id: 'tenant-1', email: 'tenant@example.com', name: 'Tenant' }),
+    listApplications: async () => [{ applicationId: 'APP-1' }],
+    listDeals: async () => [{ dealId: 'DEAL-1' }, { dealId: 'DEAL-2' }],
+    listDocuments: async () => [],
+    listNotifications: async () => [{ title: 'Welcome' }],
+    getPreferences: () => ({ inApp: true }),
+    ...overrides,
   }
-})
+}
 
-// Import AFTER mock is registered
-const { TenantDataExportService } = await import('./tenantDataExportService.js')
+function zipEntryNames(zip: Buffer): string[] {
+  const names: string[] = []
+  let offset = zip.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]))
+  while (offset !== -1 && offset + 46 <= zip.length) {
+    const nameLength = zip.readUInt16LE(offset + 28)
+    names.push(zip.subarray(offset + 46, offset + 46 + nameLength).toString('utf8'))
+    offset = zip.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), offset + 46 + nameLength)
+  }
+  return names
+}
 
-const TENANT_A = 'tenant-aaaa-0001'
-const TENANT_B = 'tenant-bbbb-0002'
+describe('tenant data export service (#1899)', () => {
+  let store: TenantDataExportStore
 
-// Reset to a fresh repo before each test
-beforeEach(() => { activeRepo = new DataExportRepository() })
-
-// ─── 1. requestExport — job creation ─────────────────────────────────────────
-
-describe('TenantDataExportService.requestExport', () => {
-  it('returns a job with status pending immediately', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    expect(job.status).toBe('pending')
-    expect(job.userId).toBe(TENANT_A)
-    expect(job.id).toBeTruthy()
+  beforeEach(() => {
+    vi.clearAllMocks()
+    store = new InMemoryTenantDataExportStore()
+    storage.uploadFile.mockResolvedValue({ key: 'k', url: 'u' })
+    storage.deleteFile.mockResolvedValue(undefined)
   })
 
-  it('job has no downloadUrl or expiresAt on creation', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    expect(job.downloadUrl).toBeUndefined()
-    expect(job.expiresAt).toBeUndefined()
+  describe('buildExportFiles', () => {
+    it('writes one JSON file per domain plus a manifest that counts records', () => {
+      const files = buildExportFiles(
+        'tenant-1',
+        {
+          profile: { id: 'tenant-1' },
+          applications: [{}],
+          deals: [{}, {}],
+          documents: [],
+          notifications: [{}, {}, {}],
+          preferences: { inApp: true },
+        },
+        new Date('2026-10-19T10:00:00.000Z'),
+      )
+
+      expect(Object.keys(files).sort()).toEqual([
+        'applications.json',
+        'deals.json',
+        'documents.json',
+        'manifest.json',
+        'notifications.json',
+        'preferences.json',
+        'profile.json',
+      ])
+      const manifest = JSON.parse(files['manifest.json'].toString('utf8'))
+      expect(manifest.userId).toBe('tenant-1')
+      expect(manifest.files.find((f: { name: string }) => f.name === 'deals.json').recordCount).toBe(2)
+      expect(manifest.files.find((f: { name: string }) => f.name === 'notifications.json').recordCount).toBe(3)
+    })
   })
 
-  it('each call creates a distinct job id', async () => {
-    const j1 = await activeRepo.createJob(TENANT_A)
-    const j2 = await activeRepo.createJob(TENANT_A)
-    expect(j1.id).not.toBe(j2.id)
+  describe('defaultExportSources.getProfile', () => {
+    it('never includes credentials or key material', async () => {
+      vi.spyOn(userStore, 'getById').mockResolvedValue({
+        id: 'tenant-1',
+        email: 'tenant@example.com',
+        name: 'Tenant',
+        role: 'tenant',
+        tier: 'free',
+        planQuota: 3,
+        displayCurrency: 'NGN',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        // Fields that exist on richer records and must never be exported.
+        passwordHash: 'hash',
+        refreshToken: 'refresh',
+        encryptedWalletKey: 'enc',
+      } as any)
+
+      const profile = await defaultExportSources.getProfile('tenant-1')
+
+      expect(profile).not.toBeNull()
+      const serialised = JSON.stringify(profile)
+      expect(serialised).not.toContain('passwordHash')
+      expect(serialised).not.toContain('refreshToken')
+      expect(serialised).not.toContain('encryptedWalletKey')
+      expect(serialised).not.toContain('hash')
+    })
   })
 
-  it('returns the job immediately (pending) before processJob runs', async () => {
-    vi.useFakeTimers()
-    const svc = new TenantDataExportService()
-    const job = await svc.requestExport(TENANT_A)
-    expect(job.status).toBe('pending')
-    vi.useRealTimers()
-  })
-})
+  describe('generateTenantDataExport', () => {
+    it('builds, uploads under the per-user prefix and marks the request ready', async () => {
+      const record = await store.create('tenant-1')
+      const now = new Date('2026-10-19T10:00:00.000Z')
+      const upload = vi.fn().mockResolvedValue({ key: 'k', url: 'u' })
 
-// ─── 2. processJob — lifecycle and content ────────────────────────────────────
+      const result = await generateTenantDataExport(record.id, {
+        store,
+        sources: fakeSources(),
+        upload,
+        now: () => now,
+      })
 
-describe('TenantDataExportService.processJob', () => {
-  it('transitions job pending → processing → ready', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    expect((await activeRepo.getJob(job.id))!.status).toBe('ready')
-  })
+      expect(result.status).toBe('ready')
+      const [key, body, contentType] = upload.mock.calls[0]
+      expect(key).toBe(exportStorageKey('tenant-1', record.id))
+      expect(key.startsWith('tenant-data-exports/tenant-1/')).toBe(true)
+      expect(contentType).toBe('application/zip')
+      expect(body.readUInt32LE(0)).toBe(0x04034b50)
 
-  it('ready job has a downloadUrl', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    expect((await activeRepo.getJob(job.id))!.downloadUrl).toBeTruthy()
-  })
+      const names = zipEntryNames(body)
+      expect(names).toContain('manifest.json')
+      expect(names).toContain('profile.json')
 
-  it('downloadUrl contains the job id', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    expect((await activeRepo.getJob(job.id))!.downloadUrl).toContain(job.id)
-  })
+      const updated = await store.findById(record.id)
+      expect(updated).toMatchObject({ status: 'ready', storageKey: key })
+      expect(updated!.completedAt!.toISOString()).toBe(now.toISOString())
+      expect(updated!.expiresAt!.getTime()).toBe(now.getTime() + EXPORT_ARCHIVE_TTL_MS)
+    })
 
-  it('downloadUrl does not expose the userId (PII)', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    expect((await activeRepo.getJob(job.id))!.downloadUrl).not.toContain(TENANT_A)
-  })
+    it('skips a request that is no longer pending, so re-delivered jobs are harmless', async () => {
+      const record = await store.create('tenant-1')
+      await store.update(record.id, { status: 'ready' })
+      const upload = vi.fn()
 
-  it('expiresAt is ~48 hours in the future', async () => {
-    const before = Date.now()
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    const after = Date.now()
-    const expiryMs = (await activeRepo.getJob(job.id))!.expiresAt!.getTime()
-    const h48 = 48 * 60 * 60 * 1000
-    expect(expiryMs).toBeGreaterThanOrEqual(before + h48 - 1000)
-    expect(expiryMs).toBeLessThanOrEqual(after  + h48 + 1000)
-  })
+      const result = await generateTenantDataExport(record.id, { store, sources: fakeSources(), upload })
 
-  it('throws for a non-existent job id', async () => {
-    await expect(new TenantDataExportService().processJob('no-such-job'))
-      .rejects.toThrow('DataExportJob not found')
-  })
+      expect(result.status).toBe('ready')
+      expect(upload).not.toHaveBeenCalled()
+    })
 
-  it('two tenants get distinct download URLs', async () => {
-    const svc = new TenantDataExportService()
-    const jA = await activeRepo.createJob(TENANT_A)
-    const jB = await activeRepo.createJob(TENANT_B)
-    await svc.processJob(jA.id)
-    await svc.processJob(jB.id)
-    const urlA = (await activeRepo.getJob(jA.id))!.downloadUrl
-    const urlB = (await activeRepo.getJob(jB.id))!.downloadUrl
-    expect(urlA).not.toBe(urlB)
-  })
-})
+    it('records a generic failure reason and does not rethrow when upload fails', async () => {
+      const record = await store.create('tenant-1')
+      const upload = vi.fn().mockRejectedValue(new Error('s3 credentials invalid: AKIA...'))
 
-// ─── 3. Cross-tenant scoping ──────────────────────────────────────────────────
+      const result = await generateTenantDataExport(record.id, { store, sources: fakeSources(), upload })
 
-describe('TenantDataExportService.getExportStatus — cross-tenant scoping', () => {
-  it("returns status for own job", async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect(status).not.toBeNull()
-    expect(status!.status).toBe('pending')
+      expect(result.status).toBe('failed')
+      const updated = await store.findById(record.id)
+      expect(updated!.status).toBe('failed')
+      expect(updated!.failureReason).toBe(
+        'The export could not be generated. Please request a new export.',
+      )
+      expect(updated!.failureReason).not.toContain('AKIA')
+    })
   })
 
-  it("returns null when tenant B requests tenant A's job", async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    expect(await svc.getExportStatus(job.id, TENANT_B)).toBeNull()
-  })
+  describe('expireTenantDataExports', () => {
+    it('deletes archives past their window and marks them expired, leaving live ones alone', async () => {
+      const now = new Date('2026-10-30T00:00:00.000Z')
+      const stale = await store.create('tenant-1')
+      await store.update(stale.id, {
+        status: 'ready',
+        storageKey: 'tenant-data-exports/tenant-1/old.zip',
+        expiresAt: new Date('2026-10-29T00:00:00.000Z'),
+      })
+      const live = await store.create('tenant-2')
+      await store.update(live.id, {
+        status: 'ready',
+        storageKey: 'tenant-data-exports/tenant-2/new.zip',
+        expiresAt: new Date('2026-11-05T00:00:00.000Z'),
+      })
 
-  it('returns null for a completely unknown job id', async () => {
-    expect(await new TenantDataExportService().getExportStatus('ghost', TENANT_A)).toBeNull()
-  })
+      const expired = await expireTenantDataExports(now, store)
 
-  it("tenant B's job is invisible to tenant A", async () => {
-    const svc = new TenantDataExportService()
-    const jobB = await activeRepo.createJob(TENANT_B)
-    expect(await svc.getExportStatus(jobB.id, TENANT_A)).toBeNull()
-  })
-
-  it('both tenants can see their own jobs simultaneously', async () => {
-    const svc = new TenantDataExportService()
-    const jA = await activeRepo.createJob(TENANT_A)
-    const jB = await activeRepo.createJob(TENANT_B)
-    expect((await svc.getExportStatus(jA.id, TENANT_A))!.status).toBe('pending')
-    expect((await svc.getExportStatus(jB.id, TENANT_B))!.status).toBe('pending')
-  })
-})
-
-// ─── 4. Field safety ─────────────────────────────────────────────────────────
-
-describe('TenantDataExportService.getExportStatus — field safety', () => {
-  it('response does not include userId', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect((status as any).userId).toBeUndefined()
-  })
-
-  it('response does not include internal id', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect((status as any).id).toBeUndefined()
-  })
-
-  it('ready job response has exactly status, downloadUrl, expiresAt — no internal fields', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect(status!.status).toBe('ready')
-    expect(status!.downloadUrl).toBeTruthy()
-    expect(status!.expiresAt).toBeInstanceOf(Date)
-    const keys = Object.keys(status!)
-    expect(keys).not.toContain('userId')
-    expect(keys).not.toContain('id')
-    expect(keys).not.toContain('createdAt')
-    expect(keys).not.toContain('updatedAt')
-  })
-
-  it('pending response has no downloadUrl or expiresAt', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect(status!.status).toBe('pending')
-    expect(status!.downloadUrl).toBeUndefined()
-    expect(status!.expiresAt).toBeUndefined()
-  })
-
-  it('processing response has no downloadUrl yet', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await activeRepo.updateJob(job.id, { status: 'processing' })
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect(status!.status).toBe('processing')
-    expect(status!.downloadUrl).toBeUndefined()
-  })
-})
-
-// ─── 5. Empty export ─────────────────────────────────────────────────────────
-
-describe('empty export — tenant with no prior data', () => {
-  it('processJob succeeds for a brand-new tenant', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob('new-tenant-zero-data')
-    await expect(svc.processJob(job.id)).resolves.not.toThrow()
-    expect((await activeRepo.getJob(job.id))!.status).toBe('ready')
-  })
-
-  it('empty export produces a valid https downloadUrl', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob('new-tenant-zero-data')
-    await svc.processJob(job.id)
-    expect((await activeRepo.getJob(job.id))!.downloadUrl).toMatch(/^https:\/\//)
-  })
-
-  it('getExportStatus returns well-formed status for empty-export ready job', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob('new-tenant-zero-data')
-    await svc.processJob(job.id)
-    const status = await svc.getExportStatus(job.id, 'new-tenant-zero-data')
-    expect(status!.status).toBe('ready')
-    expect(status!.downloadUrl).toBeTruthy()
-    expect(status!.expiresAt).toBeInstanceOf(Date)
-  })
-})
-
-// ─── 6. Job expiry ────────────────────────────────────────────────────────────
-
-describe('DataExportRepository.markExpiredJobs', () => {
-  it('marks past-expiry ready jobs as expired', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    await activeRepo.updateJob(job.id, { status: 'ready', downloadUrl: 'https://x', expiresAt: new Date(Date.now() - 1000) })
-    await activeRepo.markExpiredJobs()
-    expect((await activeRepo.getJob(job.id))!.status).toBe('expired')
-  })
-
-  it('does not expire ready jobs with future expiresAt', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    await activeRepo.updateJob(job.id, { status: 'ready', downloadUrl: 'https://x', expiresAt: new Date(Date.now() + 48 * 3600_000) })
-    await activeRepo.markExpiredJobs()
-    expect((await activeRepo.getJob(job.id))!.status).toBe('ready')
-  })
-
-  it('does not expire pending or processing jobs', async () => {
-    const j1 = await activeRepo.createJob(TENANT_A)
-    const j2 = await activeRepo.createJob(TENANT_B)
-    await activeRepo.updateJob(j2.id, { status: 'processing' })
-    await activeRepo.markExpiredJobs()
-    expect((await activeRepo.getJob(j1.id))!.status).toBe('pending')
-    expect((await activeRepo.getJob(j2.id))!.status).toBe('processing')
-  })
-
-  it('getExportStatus returns expired status for an expired job', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await activeRepo.updateJob(job.id, { status: 'ready', downloadUrl: 'https://x', expiresAt: new Date(Date.now() - 1000) })
-    await activeRepo.markExpiredJobs()
-    const status = await svc.getExportStatus(job.id, TENANT_A)
-    expect(status!.status).toBe('expired')
-  })
-})
-
-// ─── 7. DataExportRepository contract ────────────────────────────────────────
-
-describe('DataExportRepository', () => {
-  it('getJob returns null for unknown job', async () => {
-    expect(await activeRepo.getJob('unknown')).toBeNull()
-  })
-
-  it('getJobByIdForUser returns null on userId mismatch', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    expect(await activeRepo.getJobByIdForUser(job.id, TENANT_B)).toBeNull()
-  })
-
-  it('getJobByIdForUser returns job on userId match', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    expect((await activeRepo.getJobByIdForUser(job.id, TENANT_A))!.id).toBe(job.id)
-  })
-
-  it('updateJob throws for unknown job', async () => {
-    await expect(activeRepo.updateJob('no-such', { status: 'processing' })).rejects.toThrow('DataExportJob not found')
-  })
-
-  it('updateJob persists status', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    await activeRepo.updateJob(job.id, { status: 'processing' })
-    expect((await activeRepo.getJob(job.id))!.status).toBe('processing')
-  })
-
-  it('tenant jobs are independent', async () => {
-    const jA = await activeRepo.createJob(TENANT_A)
-    const jB = await activeRepo.createJob(TENANT_B)
-    await activeRepo.updateJob(jA.id, { status: 'ready', downloadUrl: 'https://a' })
-    expect((await activeRepo.getJob(jB.id))!.status).toBe('pending')
-  })
-})
-
-// ─── 8. Store parity + PII safety ────────────────────────────────────────────
-
-describe('store parity — export scope vs erasure scope', () => {
-  it('DataExportJob.userId is the sole scoping key', async () => {
-    const job = await activeRepo.createJob(TENANT_A)
-    expect(job.userId).toBe(TENANT_A)
-  })
-
-  it('export job does not contain raw encryption artefacts', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    const serialised = JSON.stringify(await activeRepo.getJob(job.id))
-    expect(serialised).not.toMatch(/ENCRYPTION_KEY/i)
-    expect(serialised).not.toMatch(/secret/i)
-    expect(serialised).not.toMatch(/password/i)
-  })
-
-  it('status response shape is stable across multiple calls', async () => {
-    const svc = new TenantDataExportService()
-    const job = await activeRepo.createJob(TENANT_A)
-    await svc.processJob(job.id)
-    const s1 = await svc.getExportStatus(job.id, TENANT_A)
-    const s2 = await svc.getExportStatus(job.id, TENANT_A)
-    expect(Object.keys(s1!).sort()).toEqual(Object.keys(s2!).sort())
-    expect(s1!.downloadUrl).toBe(s2!.downloadUrl)
+      expect(expired).toBe(1)
+      expect(storage.deleteFile).toHaveBeenCalledWith('tenant-data-exports/tenant-1/old.zip')
+      expect(storage.deleteFile).not.toHaveBeenCalledWith('tenant-data-exports/tenant-2/new.zip')
+      expect(await store.findById(stale.id)).toMatchObject({ status: 'expired', storageKey: null })
+      expect(await store.findById(live.id)).toMatchObject({ status: 'ready' })
+    })
   })
 })

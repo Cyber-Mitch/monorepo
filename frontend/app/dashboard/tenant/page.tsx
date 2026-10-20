@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   Building2,
   CreditCard,
-  MessageSquare,
   Calendar,
   Clock,
   CheckCircle,
@@ -484,15 +483,6 @@ export default function TenantDashboard() {
                         Your Landlord
                       </p>
                     </div>
-                    <Link href="/messages" className="ml-auto">
-                      <Button
-                        size="sm"
-                        className="border-2 border-foreground bg-secondary font-bold"
-                      >
-                        <MessageSquare className="mr-1 h-4 w-4" />
-                        Message
-                      </Button>
-                    </Link>
                   </div>
                 </Card>
               ) : (

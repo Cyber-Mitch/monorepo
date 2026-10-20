@@ -27,6 +27,7 @@ export type AdminOperation =
   | 'settle_dispute_timeout'
   | 'register_deal'
   | 'record_equity_payment'
+  | 'update_reputation'
   | 'stake'
   | 'unstake'
   | 'claim'

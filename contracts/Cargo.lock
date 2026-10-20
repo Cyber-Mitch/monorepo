@@ -15,13 +15,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allowlist_registry"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -593,14 +586,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "epoch_rewards"
-version = "0.1.0"
-dependencies = [
- "soroban-pausable",
- "soroban-sdk",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -715,14 +700,6 @@ dependencies = [
  "r-efi",
  "wasip2",
  "wasip3",
-]
-
-[[package]]
-name = "governance"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
- "soroban_access_control",
 ]
 
 [[package]]
@@ -862,15 +839,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e04e2fd2b8188ea827b32ef11de88377086d690286ab35747ef7f9bf3ccb590"
 
 [[package]]
-name = "inspector_bond"
-version = "0.1.0"
-dependencies = [
- "soroban-pausable",
- "soroban-sdk",
- "soroban_access_control",
-]
-
-[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -956,7 +924,9 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "multisig_admin"
 version = "0.1.0"
 dependencies = [
+ "soroban-pausable",
  "soroban-sdk",
+ "soroban_access_control",
 ]
 
 [[package]]
@@ -1017,14 +987,6 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
-
-[[package]]
-name = "oracle_price_feeds"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
- "soroban_access_control",
-]
 
 [[package]]
 name = "p256"
@@ -1206,14 +1168,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reentrancy_guard"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
- "soroban_access_control",
-]
-
-[[package]]
 name = "ref-cast"
 version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1253,14 +1207,6 @@ version = "0.1.0"
 dependencies = [
  "soroban-pausable",
  "soroban-sdk",
-]
-
-[[package]]
-name = "rent_to_own"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
- "soroban_access_control",
 ]
 
 [[package]]
@@ -1323,10 +1269,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "schema-registry"
+name = "schema_registry"
 version = "0.1.0"
 dependencies = [
+ "soroban-pausable",
  "soroban-sdk",
+ "soroban_access_control",
 ]
 
 [[package]]
@@ -1717,15 +1665,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "stake_delegation"
-version = "0.1.0"
-dependencies = [
- "soroban-pausable",
- "soroban-sdk",
- "soroban_access_control",
-]
-
-[[package]]
 name = "staking_pool"
 version = "0.1.0"
 dependencies = [
@@ -1932,14 +1871,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vesting_schedule"
-version = "0.1.0"
-dependencies = [
- "soroban-pausable",
- "soroban-sdk",
-]
 
 [[package]]
 name = "wait-timeout"

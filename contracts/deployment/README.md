@@ -142,13 +142,5 @@ The full workspace includes these contracts:
 | deal_escrow                   | Soroban |
 | contract_access               | Soroban |
 | timelock                      | Soroban |
-| vesting_schedule              | Soroban |
-| schema_registry               | Soroban |
-| allowlist_registry            | Soroban |
 | bond_collateral               | Soroban |
-| reentrancy_guard              | Soroban |
-| epoch_rewards                 | Soroban |
 | slashing_module               | Soroban |
-| stake_delegation              | Soroban |
-| oracle_price_feeds            | Soroban |
-| tenant_reputation             | Soroban |

@@ -1,9 +1,14 @@
-import type { Metadata } from "next"
-import { privatePageMetadata } from "@/lib/seo"
-import SavedClient from "./SavedClient"
+import type { Metadata } from "next";
+import { privatePageMetadata } from "@/lib/seo";
+import SavedPropertiesClient from "./SavedPropertiesClient";
 
-export const metadata: Metadata = privatePageMetadata("Saved Properties", "Your private Shelterflex property shortlist.")
+/**
+ * Server entry point for `/properties/saved`. The metadata export lives here
+ * because the UI is a client component (see SEO_METADATA_CONVENTION.md).
+ * The page is signed-in only, so it is excluded from indexing.
+ */
+export const metadata: Metadata = privatePageMetadata("Saved Properties");
 
 export default function SavedPropertiesPage() {
-  return <SavedClient />
+  return <SavedPropertiesClient />;
 }

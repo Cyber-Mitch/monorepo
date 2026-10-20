@@ -1,233 +1,208 @@
-/**
- * tenantDataExport.test.ts
- * Route coverage for the tenant-facing data export (GDPR-style data-portability)
- * endpoints. Service-level behavior (job lifecycle, cross-tenant scoping, field
- * safety) is already covered in tenantDataExportService.test.ts — this file mocks
- * the service and focuses on HTTP wiring: status codes, response shape, auth
- * guarding, and error propagation.
- *
- * Distinct from the account-erasure cascade in #1539 (a tenant asking for data to
- * be deleted) — this is a tenant asking for a copy of their own data.
- */
-
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import request from 'supertest'
-import express, { type Express } from 'express'
-import { errorHandler } from '../middleware/errorHandler.js'
+import express from 'express'
+
+const mocks = vi.hoisted(() => ({
+  schedule: vi.fn(),
+  generatePresignedDownload: vi.fn(),
+  auditLog: vi.fn(),
+}))
+
+vi.mock('../jobs/scheduler/worker.js', () => ({
+  getScheduler: () => ({ schedule: mocks.schedule }),
+}))
+vi.mock('../services/storageService.js', () => ({
+  uploadFile: vi.fn(),
+  deleteFile: vi.fn(),
+  generatePresignedDownload: mocks.generatePresignedDownload,
+}))
+
 import { createTenantDataExportRouter } from './tenantDataExport.js'
+import { errorHandler } from '../middleware/errorHandler.js'
+import { requestIdMiddleware } from '../middleware/requestId.js'
+import { sessionStore, userStore } from '../models/authStore.js'
+import {
+  InMemoryTenantDataExportStore,
+  initTenantDataExportStore,
+  tenantDataExportStore,
+} from '../models/tenantDataExportStore.js'
+import * as auditLogger from '../utils/auditLogger.js'
 
-const authState = vi.hoisted(() => ({
-  mode: 'authenticated' as 'authenticated' | 'no-token' | 'no-user',
-  user: {
-    id: 'tenant-1',
-    email: 'tenant@example.com',
-    name: 'Tenant',
-    role: 'tenant' as string,
-  },
-}))
-
-const serviceMock = vi.hoisted(() => ({
-  requestExport: vi.fn(),
-  getExportStatus: vi.fn(),
-}))
-
-vi.mock('../middleware/auth.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../middleware/auth.js')>()
-  const { AppError } = await import('../errors/AppError.js')
-  const { ErrorCode } = await import('../errors/errorCodes.js')
-  return {
-    ...original,
-    authenticateToken: (req: any, _res: any, next: any) => {
-      if (authState.mode === 'no-token') {
-        next(new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication token required'))
-        return
-      }
-      if (authState.mode === 'no-user') {
-        next()
-        return
-      }
-      req.user = authState.user
-      next()
-    },
-  }
-})
-
-vi.mock('../services/tenantDataExportService.js', () => ({
-  tenantDataExportService: serviceMock,
-}))
-
-function buildApp(): Express {
+function buildApp(): express.Express {
   const app = express()
+  app.use(requestIdMiddleware)
   app.use(express.json())
-  app.use((req: any, _res, next) => {
-    req.requestId = 'test-request-id'
-    next()
-  })
-  app.use('/api/tenant/data-export', createTenantDataExportRouter())
+  app.use('/api/v1/tenant/data-export', createTenantDataExportRouter())
   app.use(errorHandler)
   return app
 }
 
-describe('Tenant Data Export Routes', () => {
-  beforeEach(() => {
-    authState.mode = 'authenticated'
-    authState.user = { id: 'tenant-1', email: 'tenant@example.com', name: 'Tenant', role: 'tenant' }
-    serviceMock.requestExport.mockReset()
-    serviceMock.getExportStatus.mockReset()
+const auth = (token: string) => ({ Authorization: `Bearer ${token}` })
+
+describe('Tenant data export routes (#1899)', () => {
+  let app: express.Express
+  let tenantId: string
+  let tenantToken: string
+  let otherToken: string
+  let auditSpy: ReturnType<typeof vi.spyOn>
+
+  function auditEvents(): string[] {
+    return auditSpy.mock.calls.map((call: unknown[]) => call[0] as string)
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    initTenantDataExportStore(new InMemoryTenantDataExportStore())
+    sessionStore.clear()
+    userStore.clear()
+    mocks.schedule.mockResolvedValue({ id: 'job-1' })
+    mocks.generatePresignedDownload.mockResolvedValue({
+      downloadUrl: 'https://storage.example/presigned',
+      expiresAt: '2026-10-19T10:05:00.000Z',
+    })
+    auditSpy = vi.spyOn(auditLogger, 'auditLog').mockImplementation(() => undefined)
+    app = buildApp()
+
+    const tenant = await userStore.getOrCreateByEmail('export-tenant@example.com')
+    tenantId = tenant.id
+    tenantToken = 'test-token-export-tenant'
+    await sessionStore.create(tenant.email, tenantToken)
+
+    const other = await userStore.getOrCreateByEmail('export-other@example.com')
+    otherToken = 'test-token-export-other'
+    await sessionStore.create(other.email, otherToken)
   })
 
-  // ---------------------------------------------------------------------------
-  // POST /request
-  // ---------------------------------------------------------------------------
-  describe('POST /request', () => {
-    it('returns 202 with jobId, pending status, and a message', async () => {
-      serviceMock.requestExport.mockResolvedValue({ id: 'job-123', userId: 'tenant-1', status: 'pending' })
+  async function requestExport(token = tenantToken) {
+    return request(app).post('/api/v1/tenant/data-export').set(auth(token))
+  }
 
-      const res = await request(buildApp()).post('/api/tenant/data-export/request')
+  it('requires authentication', async () => {
+    const res = await request(app).post('/api/v1/tenant/data-export')
+    expect(res.status).toBe(401)
+  })
+
+  describe('POST /api/v1/tenant/data-export', () => {
+    it('accepts the request, enqueues the job and audits it', async () => {
+      const res = await requestExport()
 
       expect(res.status).toBe(202)
-      expect(res.body.jobId).toBe('job-123')
-      expect(res.body.status).toBe('pending')
-      expect(typeof res.body.message).toBe('string')
-      expect(res.body.message.length).toBeGreaterThan(0)
+      expect(res.body.data).toMatchObject({ status: 'pending' })
+      expect(mocks.schedule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'tenant.data_export',
+          handler: 'tenant.data_export',
+          payload: { exportId: res.body.data.id },
+        }),
+      )
+      expect(auditEvents()).toContain('TENANT_DATA_EXPORT_REQUESTED')
     })
 
-    it('calls requestExport with the authenticated user id', async () => {
-      serviceMock.requestExport.mockResolvedValue({ id: 'job-123', userId: 'tenant-1', status: 'pending' })
+    it('rejects a second request while one is in progress (409)', async () => {
+      await requestExport()
+      const res = await requestExport()
 
-      await request(buildApp()).post('/api/tenant/data-export/request')
-
-      expect(serviceMock.requestExport).toHaveBeenCalledWith('tenant-1')
-      expect(serviceMock.requestExport).toHaveBeenCalledTimes(1)
+      expect(res.status).toBe(409)
+      expect(mocks.schedule).toHaveBeenCalledTimes(1)
     })
 
-    it('scopes the export to whichever authenticated tenant makes the request', async () => {
-      serviceMock.requestExport.mockResolvedValue({ id: 'job-456', userId: 'tenant-2', status: 'pending' })
-      authState.user = { id: 'tenant-2', email: 'other@example.com', name: 'Other Tenant', role: 'tenant' }
+    it('rate-limits to one request per 24 hours (429)', async () => {
+      const first = await requestExport()
+      await tenantDataExportStore.update(first.body.data.id, {
+        status: 'ready',
+        storageKey: 'tenant-data-exports/x/y.zip',
+        expiresAt: new Date(Date.now() + 60_000),
+      })
 
-      await request(buildApp()).post('/api/tenant/data-export/request')
+      const res = await requestExport()
 
-      expect(serviceMock.requestExport).toHaveBeenCalledWith('tenant-2')
+      expect(res.status).toBe(429)
+      expect(res.body.error.message).toMatch(/Next request allowed at/)
     })
 
-    it('rejects an unauthenticated request', async () => {
-      authState.mode = 'no-token'
+    it('marks the request failed and surfaces an error when the job cannot be queued', async () => {
+      mocks.schedule.mockRejectedValue(new Error('queue down'))
 
-      const res = await request(buildApp()).post('/api/tenant/data-export/request')
-
-      expect(res.status).toBe(401)
-      expect(res.body.error.code).toBe('UNAUTHORIZED')
-      expect(serviceMock.requestExport).not.toHaveBeenCalled()
-    })
-
-    it('returns 401 when the session resolves without a user attached', async () => {
-      authState.mode = 'no-user'
-
-      const res = await request(buildApp()).post('/api/tenant/data-export/request')
-
-      expect(res.status).toBe(401)
-      expect(res.body.error.code).toBe('UNAUTHORIZED')
-      expect(res.body.error.message).toBe('Authentication required')
-      expect(serviceMock.requestExport).not.toHaveBeenCalled()
-    })
-
-    it('propagates a service failure to the error handler', async () => {
-      serviceMock.requestExport.mockRejectedValue(new Error('storage unavailable'))
-
-      const res = await request(buildApp()).post('/api/tenant/data-export/request')
+      const res = await requestExport()
 
       expect(res.status).toBe(500)
+      const latest = await tenantDataExportStore.findLatestByUserId(tenantId)
+      expect(latest).toMatchObject({ status: 'failed' })
     })
   })
 
-  // ---------------------------------------------------------------------------
-  // GET /:jobId
-  // ---------------------------------------------------------------------------
-  describe('GET /:jobId', () => {
-    it('returns pending status with no downloadUrl or expiresAt', async () => {
-      serviceMock.getExportStatus.mockResolvedValue({ status: 'pending' })
+  describe('GET /api/v1/tenant/data-export/:id', () => {
+    it('shows pending status without a download URL', async () => {
+      const created = await requestExport()
 
-      const res = await request(buildApp()).get('/api/tenant/data-export/job-123')
+      const res = await request(app)
+        .get(`/api/v1/tenant/data-export/${created.body.data.id}`)
+        .set(auth(tenantToken))
 
       expect(res.status).toBe(200)
-      expect(res.body.status).toBe('pending')
-      expect(res.body.downloadUrl).toBeUndefined()
-      expect(res.body.expiresAt).toBeUndefined()
+      expect(res.body.data.status).toBe('pending')
+      expect(res.body.data.downloadUrl).toBeUndefined()
+      expect(mocks.generatePresignedDownload).not.toHaveBeenCalled()
     })
 
-    it('returns ready status with downloadUrl and an ISO-string expiresAt', async () => {
-      const expiresAt = new Date('2026-08-29T00:00:00.000Z')
-      serviceMock.getExportStatus.mockResolvedValue({
+    it('issues a short-lived download URL once ready, and audits the download', async () => {
+      const created = await requestExport()
+      await tenantDataExportStore.update(created.body.data.id, {
         status: 'ready',
-        downloadUrl: 'https://s3.example.com/exports/job-123.zip?expires=1',
-        expiresAt,
+        storageKey: 'tenant-data-exports/tenant/id.zip',
+        completedAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       })
 
-      const res = await request(buildApp()).get('/api/tenant/data-export/job-123')
+      const res = await request(app)
+        .get(`/api/v1/tenant/data-export/${created.body.data.id}`)
+        .set(auth(tenantToken))
 
       expect(res.status).toBe(200)
-      expect(res.body.status).toBe('ready')
-      expect(res.body.downloadUrl).toBe('https://s3.example.com/exports/job-123.zip?expires=1')
-      expect(res.body.expiresAt).toBe(expiresAt.toISOString())
+      expect(res.body.data).toMatchObject({
+        status: 'ready',
+        downloadUrl: 'https://storage.example/presigned',
+      })
+      expect(mocks.generatePresignedDownload).toHaveBeenCalledWith(
+        'tenant-data-exports/tenant/id.zip',
+        300,
+      )
+      expect(auditEvents()).toContain('TENANT_DATA_EXPORT_DOWNLOADED')
     })
 
-    it('calls getExportStatus with the jobId param and authenticated user id', async () => {
-      serviceMock.getExportStatus.mockResolvedValue({ status: 'pending' })
+    it('reports expired archives without a download URL', async () => {
+      const created = await requestExport()
+      await tenantDataExportStore.update(created.body.data.id, {
+        status: 'ready',
+        storageKey: 'tenant-data-exports/tenant/id.zip',
+        expiresAt: new Date(Date.now() - 1000),
+      })
 
-      await request(buildApp()).get('/api/tenant/data-export/job-abc')
+      const res = await request(app)
+        .get(`/api/v1/tenant/data-export/${created.body.data.id}`)
+        .set(auth(tenantToken))
 
-      expect(serviceMock.getExportStatus).toHaveBeenCalledWith('job-abc', 'tenant-1')
+      expect(res.body.data.status).toBe('expired')
+      expect(res.body.data.downloadUrl).toBeUndefined()
+      expect(mocks.generatePresignedDownload).not.toHaveBeenCalled()
     })
 
-    it('returns 404 when the job does not exist', async () => {
-      serviceMock.getExportStatus.mockResolvedValue(null)
+    it('returns 404 for another user\'s export', async () => {
+      const created = await requestExport()
 
-      const res = await request(buildApp()).get('/api/tenant/data-export/does-not-exist')
+      const res = await request(app)
+        .get(`/api/v1/tenant/data-export/${created.body.data.id}`)
+        .set(auth(otherToken))
 
       expect(res.status).toBe(404)
-      expect(res.body.error.code).toBe('NOT_FOUND')
     })
 
-    it('returns 404 when the job belongs to a different tenant (no cross-tenant leak)', async () => {
-      // The service itself scopes by userId and returns null on a mismatch —
-      // this test guards that the route surfaces that as a plain 404, not the
-      // other tenant's data.
-      serviceMock.getExportStatus.mockResolvedValue(null)
-
-      const res = await request(buildApp()).get('/api/tenant/data-export/someone-elses-job')
+    it('returns 404 for an unknown id', async () => {
+      const res = await request(app)
+        .get('/api/v1/tenant/data-export/does-not-exist')
+        .set(auth(tenantToken))
 
       expect(res.status).toBe(404)
-      expect(res.body.error.code).toBe('NOT_FOUND')
-      expect(serviceMock.getExportStatus).toHaveBeenCalledWith('someone-elses-job', 'tenant-1')
-    })
-
-    it('rejects an unauthenticated request', async () => {
-      authState.mode = 'no-token'
-
-      const res = await request(buildApp()).get('/api/tenant/data-export/job-123')
-
-      expect(res.status).toBe(401)
-      expect(res.body.error.code).toBe('UNAUTHORIZED')
-      expect(serviceMock.getExportStatus).not.toHaveBeenCalled()
-    })
-
-    it('returns 401 when the session resolves without a user attached', async () => {
-      authState.mode = 'no-user'
-
-      const res = await request(buildApp()).get('/api/tenant/data-export/job-123')
-
-      expect(res.status).toBe(401)
-      expect(res.body.error.code).toBe('UNAUTHORIZED')
-      expect(res.body.error.message).toBe('Authentication required')
-      expect(serviceMock.getExportStatus).not.toHaveBeenCalled()
-    })
-
-    it('propagates a service failure to the error handler', async () => {
-      serviceMock.getExportStatus.mockRejectedValue(new Error('db unavailable'))
-
-      const res = await request(buildApp()).get('/api/tenant/data-export/job-123')
-
-      expect(res.status).toBe(500)
     })
   })
 })

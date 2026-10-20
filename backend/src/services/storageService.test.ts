@@ -12,11 +12,25 @@ const { mockGetSignedUrl, mockS3Send } = vi.hoisted(() => ({
 }))
 
 vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn().mockImplementation(() => ({ send: mockS3Send })),
-  PutObjectCommand: vi.fn().mockImplementation((params: Record<string, unknown>) => ({ ...params, _type: 'PutObject' })),
-  GetObjectCommand: vi.fn().mockImplementation((params: Record<string, unknown>) => ({ ...params, _type: 'GetObject' })),
-  DeleteObjectCommand: vi.fn().mockImplementation((params: Record<string, unknown>) => ({ ...params, _type: 'DeleteObject' })),
-  CopyObjectCommand: vi.fn().mockImplementation((params: Record<string, unknown>) => ({ ...params, _type: 'CopyObject' })),
+  // Regular function (not arrow) so the mock can be called with `new`.
+  S3Client: vi.fn().mockImplementation(function () {
+    return { send: mockS3Send }
+  }),
+  PutObjectCommand: vi.fn().mockImplementation(function (params: Record<string, unknown>) {
+    return { ...params, _type: 'PutObject' }
+  }),
+  GetObjectCommand: vi.fn().mockImplementation(function (params: Record<string, unknown>) {
+    return { ...params, _type: 'GetObject' }
+  }),
+  DeleteObjectCommand: vi.fn().mockImplementation(function (params: Record<string, unknown>) {
+    return { ...params, _type: 'DeleteObject' }
+  }),
+  CopyObjectCommand: vi.fn().mockImplementation(function (params: Record<string, unknown>) {
+    return { ...params, _type: 'CopyObject' }
+  }),
+  HeadObjectCommand: vi.fn().mockImplementation(function (params: Record<string, unknown>) {
+    return { ...params, _type: 'HeadObject' }
+  }),
 }))
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -33,7 +47,13 @@ import {
   generatePresignedDownload,
   STORAGE_TTL,
   getStorageProvider,
+  sanitizeObjectFileName,
+  buildMessageAttachmentObjectKey,
+  messageAttachmentPrefix,
 } from './storageService.js'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -243,5 +263,118 @@ describe('Object key path-traversal safety', () => {
     const dealId = 'deal-001'
     const key = buildAgreementObjectKey(dealId)
     expect(key.startsWith(`agreements/${dealId}/`)).toBe(true)
+  })
+})
+
+// ── 6. Message attachment keys ────────────────────────────────────────────────
+
+describe('sanitizeObjectFileName', () => {
+  it.each([
+    ['lease scan.pdf', 'lease_scan.pdf'],
+    ['../../etc/passwd', 'passwd'],
+    ['C:\\Users\\me\\photo.png', 'photo.png'],
+    ['.hidden', 'hidden'],
+    ['...', 'file'],
+    ['', 'file'],
+    ['naïve résumé.pdf', 'na_ve_r_sum_.pdf'],
+  ])('%j → %j', (input, expected) => {
+    expect(sanitizeObjectFileName(input)).toBe(expected)
+  })
+
+  it('caps the length at 100 characters', () => {
+    expect(sanitizeObjectFileName('a'.repeat(300) + '.pdf')).toHaveLength(100)
+  })
+})
+
+describe('buildMessageAttachmentObjectKey', () => {
+  it('scopes the key to the conversation prefix with a uuid and safe name', () => {
+    const key = buildMessageAttachmentObjectKey('conv-1', '../x/my file.pdf')
+    expect(messageAttachmentPrefix('conv-1')).toBe('messaging/conv-1/')
+    expect(key).toMatch(/^messaging\/conv-1\/[0-9a-f-]{36}-my_file\.pdf$/)
+  })
+
+  it('generates unique keys', () => {
+    expect(buildMessageAttachmentObjectKey('c', 'a.pdf')).not.toBe(
+      buildMessageAttachmentObjectKey('c', 'a.pdf'),
+    )
+  })
+})
+
+// ── 7. headFile ───────────────────────────────────────────────────────────────
+
+describe('headFile (s3 provider)', () => {
+  const originalEnv = process.env
+
+  beforeEach(() => {
+    process.env = { ...originalEnv, STORAGE_PROVIDER: 's3', S3_BUCKET: 'test-bucket' }
+    vi.resetModules()
+    mockS3Send.mockReset()
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  it('returns size and content type from HeadObject', async () => {
+    mockS3Send.mockResolvedValue({ ContentLength: 1234, ContentType: 'application/pdf' })
+    const { headFile } = await import('./storageService.js')
+
+    await expect(headFile('messaging/c/k.pdf')).resolves.toEqual({
+      size: 1234,
+      contentType: 'application/pdf',
+    })
+    expect(mockS3Send).toHaveBeenCalledWith(
+      expect.objectContaining({ _type: 'HeadObject', Bucket: 'test-bucket', Key: 'messaging/c/k.pdf' }),
+    )
+  })
+
+  it('returns null when the object does not exist', async () => {
+    const { headFile } = await import('./storageService.js')
+
+    mockS3Send.mockRejectedValueOnce(Object.assign(new Error('NotFound'), { name: 'NotFound' }))
+    await expect(headFile('missing')).resolves.toBeNull()
+
+    mockS3Send.mockRejectedValueOnce(
+      Object.assign(new Error('nope'), { name: 'Unknown', $metadata: { httpStatusCode: 404 } }),
+    )
+    await expect(headFile('missing')).resolves.toBeNull()
+  })
+
+  it('rethrows other errors', async () => {
+    mockS3Send.mockRejectedValueOnce(
+      Object.assign(new Error('denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } }),
+    )
+    const { headFile } = await import('./storageService.js')
+    await expect(headFile('k')).rejects.toThrow('denied')
+  })
+})
+
+describe('headFile (local provider)', () => {
+  const originalEnv = process.env
+  let dir: string
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'storage-head-'))
+    process.env = { ...originalEnv, STORAGE_PROVIDER: 'local', LOCAL_STORAGE_DIR: dir }
+    vi.resetModules()
+  })
+
+  afterEach(async () => {
+    process.env = originalEnv
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('returns the file size for an existing object', async () => {
+    await mkdir(join(dir, 'messaging/c'), { recursive: true })
+    await writeFile(join(dir, 'messaging/c/a.pdf'), Buffer.alloc(42))
+    const { headFile } = await import('./storageService.js')
+    await expect(headFile('messaging/c/a.pdf')).resolves.toEqual({ size: 42 })
+  })
+
+  it('returns null for a missing object or a directory', async () => {
+    await mkdir(join(dir, 'messaging/c'), { recursive: true })
+    const { headFile } = await import('./storageService.js')
+    await expect(headFile('messaging/c/missing.pdf')).resolves.toBeNull()
+    await expect(headFile('messaging/c')).resolves.toBeNull()
   })
 })

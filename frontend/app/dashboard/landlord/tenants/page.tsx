@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Building2,
-  MessageSquare,
   CheckCircle,
   UserX,
   AlertTriangle,
@@ -175,12 +174,6 @@ export default function TenantsPage() {
                     </div>
 
                     <div className="mt-4 flex gap-3">
-                      <Link href="/messages" className="flex-1">
-                        <Button className="w-full border-3 border-foreground bg-primary font-bold shadow-[3px_3px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                          <MessageSquare className="mr-2 h-4 w-4" />
-                          Message
-                        </Button>
-                      </Link>
                       <Link href={`/dashboard/landlord/properties`} className="flex-1">
                         <Button className="w-full border-3 border-foreground bg-transparent font-bold hover:bg-muted">
                           View Details

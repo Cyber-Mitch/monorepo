@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Search, SlidersHorizontal, SearchX, X, Map, Scale } from "lucide-react";
+import { Scale, Search, SlidersHorizontal, SearchX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +21,7 @@ import {
   type PropertyListing,
 } from "@/lib/propertiesApi";
 import { trackUserInteraction, startPropertyDiscovery, trackPropertyDiscoveryStep } from "@/lib/analytics-init";
-import {
-  parseCompareIds,
-  canCompare,
-  MIN_COMPARE,
-} from "@/lib/compare";
+import { canCompare, encodeCompareIds, parseCompareIds } from "@/lib/compare";
 
 const CITIES = ["Lagos", "Abuja", "Port Harcourt", "Ibadan", "Enugu"];
 const BED_OPTIONS = ["Any", "1", "2", "3", "4", "4+"];
@@ -40,6 +36,7 @@ const SORT_OPTIONS = [
 function PropertiesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const compareIds = parseCompareIds(searchParams.get("ids"));
 
   const [savedListingIds, setSavedListingIds] = useState<string[]>([]);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -54,8 +51,6 @@ function PropertiesContent() {
     searchParams.get("query") || "",
   );
 
-  const compareIds = parseCompareIds(searchParams.get("ids"));
-  const canCompareProperties = canCompare(compareIds);
 
   const scrollTopRef = useRef(0);
   const [initialScrollTop, setInitialScrollTop] = useState(0);
@@ -297,20 +292,6 @@ function PropertiesContent() {
               >
                 Search
               </Button>
-              <Link href={`/properties/map?${searchParams.toString()}`}>
-                <Button className="border-3 border-foreground bg-background px-6 py-6 font-bold text-foreground shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                  <Map className="mr-2 h-5 w-5" />
-                  Map View
-                </Button>
-              </Link>
-              {canCompareProperties && (
-                <Link href={`/properties/compare?${searchParams.toString()}`}>
-                  <Button className="border-3 border-foreground bg-background px-6 py-6 font-bold text-foreground shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                    <Scale className="mr-2 h-5 w-5" />
-                    Compare ({compareIds.length})
-                  </Button>
-                </Link>
-              )}
               <Button
                 onClick={() => setShowFilters(!showFilters)}
                 className="border-3 border-foreground bg-background px-6 py-6 font-bold text-foreground shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
@@ -599,12 +580,20 @@ function PropertiesContent() {
       {/* Properties Grid */}
       <section className="py-12">
         <div className="container mx-auto px-4">
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <p className="text-muted-foreground">
               Showing{" "}
               <span className="font-bold text-foreground">{total}</span>{" "}
               properties
             </p>
+            {canCompare(compareIds) && (
+              <Button asChild className="gap-2 border-2 border-foreground font-bold">
+                <Link href={`/properties/compare?ids=${encodeCompareIds(compareIds)}`}>
+                  <Scale className="h-4 w-4" aria-hidden="true" />
+                  Compare ({compareIds.length})
+                </Link>
+              </Button>
+            )}
           </div>
 
           {isLoading ? (

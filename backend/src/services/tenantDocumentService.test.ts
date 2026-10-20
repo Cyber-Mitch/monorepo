@@ -32,15 +32,22 @@ vi.mock('./storageService.js', () => ({
   uploadFile: mockUploadFile,
   deleteFile: mockDeleteFile,
   generatePresignedDownload: mockGeneratePresignedDownload,
+  generatePresignedUpload: vi.fn(),
+  buildTenantDocumentObjectKey: vi.fn(),
 }))
 
-vi.mock('../repositories/TenantDocumentRepository.js', () => ({
-  tenantDocumentRepository: {
+// The vault store replaced TenantDocumentRepository; findById is driven by the
+// same storage-key mock (null ⇒ not found / not owned).
+vi.mock('../models/tenantDocumentVaultStore.js', () => ({
+  getTenantDocumentVaultStore: () => ({
     create: mockRepoCreate,
     delete: mockRepoDelete,
-    getStorageKey: mockRepoGetStorageKey,
     getTotalStorageBytes: mockRepoGetTotalStorageBytes,
-  },
+    findById: async (id: string, userId: string) => {
+      const storageKey = await mockRepoGetStorageKey(id, userId)
+      return storageKey ? { id, userId, storageKey, readOnly: false } : null
+    },
+  }),
 }))
 
 // file-type must be mocked to control MIME detection
@@ -94,6 +101,8 @@ describe('TenantDocumentService', () => {
     // Default happy-path state
     mockFileTypeFromBuffer.mockResolvedValue({ mime: 'application/pdf', ext: 'pdf' })
     mockRepoGetTotalStorageBytes.mockResolvedValue(0)
+    // Documents exist and belong to the caller unless a test says otherwise.
+    mockRepoGetStorageKey.mockResolvedValue('tenant-documents/user-1/identity/uuid.pdf')
     mockUploadFile.mockResolvedValue({ key: 'tenant-documents/user-1/identity/uuid.pdf', url: 'https://s3.example.com/...' })
     mockRepoCreate.mockResolvedValue(makeDocResponse())
     mockGeneratePresignedDownload.mockResolvedValue({

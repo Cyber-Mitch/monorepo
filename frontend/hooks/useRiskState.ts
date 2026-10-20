@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import useRiskStore from "@/store/useRiskStore";
 
+const subscribeToRiskHydration = (onStoreChange: () => void) =>
+  useRiskStore.persist.onFinishHydration(onStoreChange);
+const getRiskHydrationSnapshot = () => useRiskStore.persist.hasHydrated();
+const getServerRiskHydrationSnapshot = () => false;
+
 interface UseRiskStateResult {
+  hasHydrated: boolean;
   isFrozen: boolean;
   freezeReason: string | null;
   deficitNgn: number;
@@ -13,6 +19,13 @@ interface UseRiskStateResult {
 }
 
 export function useRiskState(): UseRiskStateResult {
+  const isStoreHydrated = useSyncExternalStore(
+    subscribeToRiskHydration,
+    getRiskHydrationSnapshot,
+    getServerRiskHydrationSnapshot,
+  );
+  const [hydrationFailed, setHydrationFailed] = useState(false);
+  const hasHydrated = isStoreHydrated || hydrationFailed;
   const { 
     isFrozen, 
     freezeReason, 
@@ -23,11 +36,17 @@ export function useRiskState(): UseRiskStateResult {
   } = useRiskStore();
 
   useEffect(() => {
-    // Only fetch if we don't have data yet or if we want to refresh on mount
-    fetchRiskState();
-  }, [fetchRiskState]);
+    if (!useRiskStore.persist.hasHydrated()) {
+      void Promise.resolve(useRiskStore.persist.rehydrate()).catch(() => setHydrationFailed(true));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (hasHydrated) fetchRiskState();
+  }, [fetchRiskState, hasHydrated]);
 
   return { 
+    hasHydrated,
     isFrozen, 
     freezeReason, 
     deficitNgn, 

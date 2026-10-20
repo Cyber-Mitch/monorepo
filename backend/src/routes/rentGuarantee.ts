@@ -1,194 +1,277 @@
-import { Router } from "express";
-import { getPool } from "../db.js";
-import { authenticateToken, AuthenticatedRequest } from "../middleware/auth.js";
-import { validate } from "../middleware/validate.js";
-import type {
-  RentGuaranteeProvider,
-  InsurancePolicy,
-} from "../services/insurance/RentGuaranteeProvider.js";
-import { AppError } from "../errors/AppError.js";
-import { ErrorCode } from "../errors/errorCodes.js";
-import { auditLog, extractAuditContext } from "../utils/auditLogger.js";
-import { idempotency } from "../middleware/idempotency.js";
-import { insuranceClaimBodySchema } from "../schemas/rentGuarantee.js";
+/**
+ * Rent guarantee insurance for landlords (#1908).
+ *
+ *  POST /deals/:dealId/rent-guarantee/quote
+ *  GET  /rent-guarantee/policies
+ *  POST /rent-guarantee/policies/:id/bind     (idempotent)
+ *  POST /rent-guarantee/policies/:id/cancel
+ *  POST /rent-guarantee/policies/:id/claims
+ *
+ * A landlord only ever sees or acts on policies for their own deals; anyone
+ * else's deal or policy is reported as 404 so ids cannot be probed.
+ */
+import { Router, type Response, type NextFunction } from 'express'
+import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
+import { validate } from '../middleware/validate.js'
+import { idempotency } from '../middleware/idempotency.js'
+import { AppError } from '../errors/AppError.js'
+import { ErrorCode } from '../errors/errorCodes.js'
+import { dealStore } from '../models/dealStore.js'
+import {
+  rentGuaranteeStore as defaultStore,
+  canTransitionPolicy,
+  type RentGuaranteePolicy,
+  type RentGuaranteeClaim,
+  type RentGuaranteeStore,
+} from '../models/rentGuaranteeStore.js'
+import { createRentGuaranteeProvider, type RentGuaranteeProvider } from '../services/insurance/index.js'
+import {
+  cancelPolicySchema,
+  dealIdParamSchema,
+  fileClaimSchema,
+  policyIdParamSchema,
+} from '../schemas/rentGuarantee.js'
+import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
 
-interface PolicyRow {
-  id: string;
-  deal_id: string;
-  landlord_id: string;
-  provider: string;
-  policy_number: string;
-  premium_ngn: string | number;
-  coverage_term_months: number;
-  status: string;
-  created_at: Date;
+export interface RentGuaranteeRouterOptions {
+  /** Defaults to the module singleton so `initRentGuaranteeStore()` swaps are honoured. */
+  store?: RentGuaranteeStore
+  provider?: RentGuaranteeProvider
 }
 
-function mapPolicyRow(row: PolicyRow): InsurancePolicy {
+function serializePolicy(p: RentGuaranteePolicy) {
   return {
-    policyNumber: row.policy_number,
-    dealId: row.deal_id,
-    landlordId: row.landlord_id,
-    provider: row.provider,
-    premiumNgn:
-      typeof row.premium_ngn === "number"
-        ? row.premium_ngn
-        : Number(row.premium_ngn),
-    coverageTermMonths: row.coverage_term_months,
-    status: row.status as InsurancePolicy["status"],
-    createdAt: new Date(row.created_at),
-  };
+    id: p.id,
+    dealId: p.dealId,
+    provider: p.provider,
+    policyNumber: p.policyNumber,
+    premiumNgn: p.premiumNgn,
+    coverageTermMonths: p.coverageTermMonths,
+    status: p.status,
+    activatedAt: p.activatedAt?.toISOString() ?? null,
+    cancelledAt: p.cancelledAt?.toISOString() ?? null,
+    cancellationReason: p.cancellationReason,
+    createdAt: p.createdAt.toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+  }
 }
 
-export function createRentGuaranteeRouter(
-  provider: RentGuaranteeProvider,
-): Router {
-  const router = Router();
-
-  async function pool() {
-    const p = await getPool();
-    if (!p)
-      throw new AppError(
-        ErrorCode.INTERNAL_ERROR,
-        500,
-        "Database pool not available",
-      );
-    return p;
+function serializeClaim(c: RentGuaranteeClaim) {
+  return {
+    id: c.id,
+    policyId: c.policyId,
+    amountNgn: c.amountNgn,
+    reason: c.reason,
+    status: c.status,
+    createdAt: c.createdAt.toISOString(),
   }
+}
 
-  function assertLandlordOrAdmin(req: AuthenticatedRequest) {
-    if (req.user?.role !== "landlord" && req.user?.role !== "admin") {
-      throw new AppError(
-        ErrorCode.FORBIDDEN,
-        403,
-        "Only landlords can access this resource",
-      );
+export function createRentGuaranteeRouter(options: RentGuaranteeRouterOptions = {}): Router {
+  const router = Router()
+  const getStore = () => options.store ?? defaultStore
+  let lazyProvider: RentGuaranteeProvider | undefined = options.provider
+  const getProvider = () => (lazyProvider ??= createRentGuaranteeProvider())
+
+  async function loadOwnedPolicy(policyId: string, userId: string): Promise<RentGuaranteePolicy> {
+    const policy = await getStore().findPolicyById(policyId)
+    if (!policy || policy.landlordId !== userId) {
+      throw new AppError(ErrorCode.NOT_FOUND, 404, 'Rent guarantee policy not found')
     }
+    return policy
   }
 
-  router.get(
-    "/deals/:dealId/insurance/quote",
-    authenticateToken,
-    async (req: AuthenticatedRequest, res, next) => {
-      try {
-        assertLandlordOrAdmin(req);
-        const { dealId } = req.params;
-        const coverageTermMonths =
-          parseInt(req.query.coverageTermMonths as string, 10) || 12;
-
-        const quote = await provider.getQuote(dealId, coverageTermMonths);
-        auditLog(
-          "INSURANCE_QUOTE_REQUESTED" as any,
-          extractAuditContext(req, "user"),
-          {
-            dealId,
-            coverageTermMonths,
-            quoteId: quote.quoteId,
-          },
-        );
-        res.json({ success: true, data: quote });
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
+  function invalidTransition(policy: RentGuaranteePolicy, action: string): AppError {
+    return new AppError(
+      ErrorCode.INVALID_STATE_TRANSITION,
+      409,
+      `Cannot ${action} a policy that is ${policy.status}`,
+    )
+  }
 
   router.post(
-    "/deals/:dealId/insurance/purchase",
+    '/deals/:dealId/rent-guarantee/quote',
+    authenticateToken,
+    validate(dealIdParamSchema, 'params'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user!.id
+        const deal = await dealStore.findById(req.params.dealId as string)
+        if (!deal || deal.landlordId !== userId) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, 'Deal not found')
+        }
+
+        const store = getStore()
+        const open = await store.findOpenPolicyForDeal(deal.dealId)
+        if (open?.status === 'active') {
+          throw new AppError(ErrorCode.CONFLICT, 409, 'This deal already has an active rent guarantee')
+        }
+        if (open) {
+          // Re-quoting returns the outstanding quote instead of stacking duplicates.
+          res.json({ policy: serializePolicy(open) })
+          return
+        }
+
+        const provider = getProvider()
+        const quote = await provider.quote({
+          dealId: deal.dealId,
+          landlordId: userId,
+          annualRentNgn: deal.annualRentNgn,
+          termMonths: deal.termMonths,
+          sequence: (await store.countPoliciesForDeal(deal.dealId)) + 1,
+        })
+        const policy = await store.createPolicy({
+          dealId: deal.dealId,
+          landlordId: userId,
+          provider: provider.name,
+          policyNumber: quote.policyNumber,
+          premiumNgn: quote.premiumNgn,
+          coverageTermMonths: quote.coverageTermMonths,
+        })
+
+        auditLog('INSURANCE_QUOTE_REQUESTED', extractAuditContext(req, 'user'), {
+          policyId: policy.id,
+          dealId: deal.dealId,
+          premiumNgn: policy.premiumNgn,
+        })
+        res.status(201).json({ policy: serializePolicy(policy) })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.get(
+    '/rent-guarantee/policies',
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const policies = await getStore().listPoliciesByLandlord(req.user!.id)
+        res.json({ policies: policies.map(serializePolicy) })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.post(
+    '/rent-guarantee/policies/:id/bind',
     authenticateToken,
     idempotency(),
-    async (req: AuthenticatedRequest, res, next) => {
+    validate(policyIdParamSchema, 'params'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        assertLandlordOrAdmin(req);
-        const { dealId } = req.params;
-        const { quoteId } = req.body;
+        const store = getStore()
+        const policy = await loadOwnedPolicy(req.params.id as string, req.user!.id)
 
-        if (!quoteId) {
+        // Binding twice is a no-op, not an error, so client retries are safe.
+        if (policy.status === 'active') {
+          res.json({ policy: serializePolicy(policy) })
+          return
+        }
+        if (!canTransitionPolicy(policy.status, 'active')) throw invalidTransition(policy, 'bind')
+
+        const bound = await getProvider().bind(policy)
+        const active = await store.transitionPolicy(policy.id, 'quoted', 'active', {
+          providerReference: bound.providerReference,
+        })
+        if (!active) {
+          // Lost a race: report whatever state the policy ended up in.
+          const current = await loadOwnedPolicy(policy.id, req.user!.id)
+          if (current.status === 'active') {
+            res.json({ policy: serializePolicy(current) })
+            return
+          }
+          throw invalidTransition(current, 'bind')
+        }
+
+        auditLog('INSURANCE_POLICY_PURCHASED', extractAuditContext(req, 'user'), {
+          policyId: active.id,
+          dealId: active.dealId,
+          premiumNgn: active.premiumNgn,
+        })
+        res.json({ policy: serializePolicy(active) })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.post(
+    '/rent-guarantee/policies/:id/cancel',
+    authenticateToken,
+    validate(policyIdParamSchema, 'params'),
+    validate(cancelPolicySchema, 'body'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const store = getStore()
+        const policy = await loadOwnedPolicy(req.params.id as string, req.user!.id)
+        if (!canTransitionPolicy(policy.status, 'cancelled')) throw invalidTransition(policy, 'cancel')
+
+        const reason = req.body?.reason as string | undefined
+        // Only a bound policy exists on the insurer's side.
+        if (policy.status === 'active') await getProvider().cancel(policy, reason)
+
+        const cancelled = await store.transitionPolicy(policy.id, policy.status, 'cancelled', {
+          cancellationReason: reason,
+        })
+        if (!cancelled) {
+          throw invalidTransition(await loadOwnedPolicy(policy.id, req.user!.id), 'cancel')
+        }
+
+        auditLog('INSURANCE_POLICY_CANCELLED', extractAuditContext(req, 'user'), {
+          policyId: cancelled.id,
+          dealId: cancelled.dealId,
+        })
+        res.json({ policy: serializePolicy(cancelled) })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.post(
+    '/rent-guarantee/policies/:id/claims',
+    authenticateToken,
+    validate(policyIdParamSchema, 'params'),
+    validate(fileClaimSchema, 'body'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const store = getStore()
+        const policy = await loadOwnedPolicy(req.params.id as string, req.user!.id)
+        if (!canTransitionPolicy(policy.status, 'claimed')) throw invalidTransition(policy, 'claim against')
+
+        const { amountNgn, reason } = req.body as { amountNgn: number; reason: string }
+        const deal = await dealStore.findById(policy.dealId)
+        if (deal && amountNgn > deal.annualRentNgn) {
           throw new AppError(
             ErrorCode.VALIDATION_ERROR,
             400,
-            "quoteId is required",
-          );
+            'Claim amount cannot exceed the deal annual rent',
+          )
         }
 
-        const policy = await provider.purchasePolicy(
-          dealId,
-          req.user!.id,
-          quoteId,
-        );
-
-        const db = await pool();
-        await db.query(
-          `INSERT INTO rent_guarantee_policies
-         (deal_id, landlord_id, provider, policy_number, premium_ngn, coverage_term_months, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            policy.dealId,
-            policy.landlordId,
-            policy.provider,
-            policy.policyNumber,
-            policy.premiumNgn,
-            policy.coverageTermMonths,
-            policy.status,
-          ],
-        );
-
-        auditLog(
-          "INSURANCE_POLICY_PURCHASED" as any,
-          extractAuditContext(req, "user"),
-          {
-            dealId,
-            policyNumber: policy.policyNumber,
-            provider: policy.provider,
-            premiumNgn: policy.premiumNgn,
-          },
-        );
-        res.status(201).json({ success: true, data: policy });
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
-
-  router.post(
-    "/insurance/:policyId/claim",
-    authenticateToken,
-    validate(insuranceClaimBodySchema),
-    async (req: AuthenticatedRequest, res, next) => {
-      try {
-        if (req.user?.role !== "landlord" && req.user?.role !== "admin") {
-          throw new AppError(
-            ErrorCode.FORBIDDEN,
-            403,
-            "Only landlords can file claims",
-          );
+        const filed = await getProvider().fileClaim(policy, { amountNgn, reason })
+        const result = await store.fileClaim(policy.id, {
+          amountNgn,
+          reason,
+          providerReference: filed.providerReference,
+        })
+        if (!result) {
+          throw invalidTransition(await loadOwnedPolicy(policy.id, req.user!.id), 'claim against')
         }
 
-        const { policyId } = req.params;
-        const claimData = req.body;
-
-        const result = await provider.fileClaim(policyId, claimData);
-
-        const db = await pool();
-        await db.query(
-          `UPDATE rent_guarantee_policies SET status = 'claimed' WHERE policy_number = $1`,
-          [policyId],
-        );
-
-        auditLog(
-          "INSURANCE_CLAIM_FILED" as any,
-          extractAuditContext(req, "user"),
-          {
-            policyId,
-            claimId: result.claimId,
-          },
-        );
-        res.json({ success: true, data: result });
+        auditLog('INSURANCE_CLAIM_FILED', extractAuditContext(req, 'user'), {
+          policyId: policy.id,
+          claimId: result.claim.id,
+          amountNgn,
+        })
+        res.status(201).json({ claim: serializeClaim(result.claim), policy: serializePolicy(result.policy) })
       } catch (error) {
-        next(error);
+        next(error)
       }
     },
-  );
+  )
 
-  return router;
+  return router
 }

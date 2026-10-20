@@ -3,22 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useUnreadMessageCount } from "@/hooks/useUnreadMessageCount";
 import {
   Home,
   Building2,
+  Heart,
+  Gift,
   CreditCard,
   MessageSquare,
   Settings,
   FileText,
-  ShieldCheck,
-  Gauge,
   DollarSign,
   Users,
   Plus,
   Menu,
   X,
-  Heart,
 } from "lucide-react";
 
 type Role = "tenant" | "landlord" | "inspector" | "whistleblower";
@@ -46,33 +44,16 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
   tenant: [
     { href: "/dashboard/tenant", label: "Dashboard", icon: Home },
     { href: "/dashboard/tenant/payments", label: "Payments", icon: CreditCard },
-    {
-      href: "/dashboard/tenant/credit-score",
-      label: "Credit Score",
-      icon: Gauge,
-    },
     { href: "/dashboard/tenant/lease", label: "My Lease", icon: FileText },
-    {
-      href: "/dashboard/tenant/vault",
-      label: "Document Vault",
-      icon: ShieldCheck,
-    },
     { href: "/properties", label: "Browse Properties", icon: Building2 },
-    {
-      href: "/properties/saved",
-      label: "Saved Properties",
-      icon: Heart,
-    },
+    { href: "/properties/saved", label: "Saved Properties", icon: Heart },
     {
       href: "/dashboard/tenant/rate-whistleblower",
       label: "Rate Whistleblower",
       icon: MessageSquare,
     },
-    {
-      href: "/messages",
-      label: "Messages",
-      icon: MessageSquare,
-    },
+    { href: "/dashboard/tenant/credit-score", label: "Credit Score", icon: CreditCard },
+    { href: "/dashboard/tenant/referrals", label: "Refer a friend", icon: Gift },
     { href: "/dashboard/tenant/settings", label: "Settings", icon: Settings },
   ],
   landlord: [
@@ -83,25 +64,9 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
       icon: Building2,
     },
     { href: "/dashboard/landlord/tenants", label: "My Tenants", icon: Users },
-    {
-      href: "/dashboard/landlord/payouts",
-      label: "Payout Schedule",
-      icon: DollarSign,
-    },
-    {
-      href: "/messages",
-      label: "Messages",
-      icon: MessageSquare,
-    },
     { href: "/dashboard/landlord/settings", label: "Settings", icon: Settings },
   ],
   inspector: [
-    { href: "/dashboard/inspector", label: "Job Board", icon: Building2 },
-    {
-      href: "/dashboard/inspector/earnings",
-      label: "Earnings",
-      icon: DollarSign,
-    },
     { href: "/", label: "Back to Home", icon: Home, footer: true },
   ],
   whistleblower: [
@@ -122,11 +87,9 @@ const ROLE_CONFIG: Record<Role, { cardBg: string; cardLabel: string }> = {
 const EXACT_MATCH_PATHS = [
   "/dashboard/tenant",
   "/dashboard/landlord",
-  "/dashboard/inspector",
   "/whistleblower/dashboard",
   "/",
   "/properties",
-  "/messages",
 ];
 
 function isNavItemActive(href: string, pathname: string): boolean {
@@ -142,23 +105,8 @@ export function DashboardSidebar({ role, userInfo }: DashboardSidebarProps) {
   const pathname = usePathname();
   const { cardBg, cardLabel } = ROLE_CONFIG[role];
   const isInspector = role === "inspector";
-  const { unreadCount } = useUnreadMessageCount();
 
-  const withMessageBadge = (item: NavItem): NavItem =>
-    item.href === "/messages" && unreadCount > 0
-      ? {
-          ...item,
-          badge: (
-            <span className="ml-auto flex h-6 w-6 items-center justify-center border-2 border-foreground bg-destructive text-xs font-bold text-destructive-foreground">
-              {unreadCount}
-            </span>
-          ),
-        }
-      : item;
-
-  const mainItems = NAV_ITEMS[role]
-    .filter((item) => !item.footer)
-    .map(withMessageBadge);
+  const mainItems = NAV_ITEMS[role].filter((item) => !item.footer);
   const footerItems = NAV_ITEMS[role].filter((item) => item.footer);
 
   useEffect(() => {

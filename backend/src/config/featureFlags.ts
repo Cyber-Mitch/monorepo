@@ -11,9 +11,6 @@ export const flagDefaults = {
   /** Staking rewards deposits, positions, and claims. */
   STAKING_ENABLED: true,
 
-  /** Stake-weighted parameter governance: proposals, voting, finalize/execute. */
-  GOVERNANCE_ENABLED: true,
-
   /** Inspector job listing, claiming, and report submission. */
   INSPECTOR_DASHBOARD_ENABLED: true,
 

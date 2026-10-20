@@ -6,10 +6,8 @@ import {
   Home,
   Building2,
   Users,
-  MessageSquare,
   Settings,
   BarChart3,
-  DollarSign,
   X,
   Menu,
 } from "lucide-react";
@@ -65,16 +63,10 @@ export function LandlordSidebar() {
     },
     { href: "/dashboard/landlord/tenants", label: "My Tenants", icon: Users },
     {
-      href: "/dashboard/landlord/payouts",
-      label: "Payout Schedule",
-      icon: DollarSign,
-    },
-    {
       href: "/dashboard/landlord/analytics",
       label: "Analytics",
       icon: BarChart3,
     },
-    { href: "/messages", label: "Messages", icon: MessageSquare, badge: 3 },
     { href: "/dashboard/landlord/settings", label: "Settings", icon: Settings },
   ];
 
@@ -139,11 +131,6 @@ export function LandlordSidebar() {
                 >
                   <Icon className="h-5 w-5" />
                   {item.label}
-                  {item.badge && (
-                    <span className="ml-auto flex h-6 w-6 items-center justify-center border-2 border-foreground bg-destructive text-xs font-bold text-destructive-foreground">
-                      {item.badge}
-                    </span>
-                  )}
                 </Link>
               );
             })}

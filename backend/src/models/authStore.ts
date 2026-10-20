@@ -7,12 +7,13 @@ import {
   type User,
   type OtpChallenge,
   type Session,
+  type ActiveSession,
   type WalletChallenge,
   type UserRole,
   type LandlordProfile
 } from '../repositories/AuthRepository.js'
 
-export type { UserRole, User, OtpChallenge, Session, WalletChallenge, LandlordProfile }
+export type { UserRole, User, OtpChallenge, Session, ActiveSession, WalletChallenge, LandlordProfile }
 
 export const SESSION_TTL_MS = 15 * 60 * 1000 // 15 minutes
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
@@ -280,6 +281,15 @@ class WalletChallengeStore {
   }
 }
 
+interface FallbackSessionMeta {
+  id: string
+  family?: string
+  ip?: string
+  userAgent?: string
+  expiresAt?: Date
+  lastActiveAt: Date
+}
+
 class SessionStore {
   private postgresRepo = new PostgresSessionRepository()
   private fallbackCache = new Map<string, Session>()
@@ -288,17 +298,23 @@ class SessionStore {
     email: string,
     token: string,
     auditInfo?: { ip?: string; userAgent?: string },
+    family?: string,
   ): Promise<Session> {
-    const session: Session & { expiresAt?: Date; userAgent?: string } = {
+    const now = new Date()
+    const session: Session & FallbackSessionMeta = {
       token,
       email,
-      createdAt: new Date(),
+      createdAt: now,
       expiresAt: new Date(Date.now() + SESSION_TTL_MS),
       userAgent: auditInfo?.userAgent,
+      ip: auditInfo?.ip,
+      id: randomUUID(),
+      family,
+      lastActiveAt: now,
     }
 
     try {
-      await this.postgresRepo.create(email, token, session.expiresAt, auditInfo)
+      await this.postgresRepo.create(email, token, session.expiresAt, auditInfo, { id: session.id, family })
     } catch (error) {
       console.warn('Postgres session creation failed, using fallback cache:', error)
     }
@@ -393,6 +409,117 @@ class SessionStore {
     return count
   }
 
+  private fallbackActive(email: string, currentToken?: string): ActiveSession[] {
+    const now = Date.now()
+    const current = currentToken
+      ? (this.fallbackCache.get(currentToken) as (Session & FallbackSessionMeta) | undefined)
+      : undefined
+    const byDevice = new Map<string, Session & FallbackSessionMeta>()
+    for (const raw of this.fallbackCache.values()) {
+      const session = raw as Session & FallbackSessionMeta
+      const expiresAt = session.expiresAt ?? new Date(session.createdAt.getTime() + SESSION_TTL_MS)
+      if (session.email !== email || expiresAt.getTime() <= now) continue
+      const key = session.family ?? session.id
+      const seen = byDevice.get(key)
+      if (!seen || seen.createdAt.getTime() <= session.createdAt.getTime()) byDevice.set(key, session)
+    }
+    return [...byDevice.values()]
+      .map((session) => ({
+        id: session.id,
+        family: session.family ?? null,
+        createdAt: session.createdAt,
+        lastActiveAt: session.lastActiveAt ?? session.createdAt,
+        expiresAt: session.expiresAt ?? new Date(session.createdAt.getTime() + SESSION_TTL_MS),
+        ip: session.ip ?? null,
+        userAgent: session.userAgent ?? null,
+        current: Boolean(
+          current &&
+            (current.id === session.id || (current.family !== undefined && current.family === session.family)),
+        ),
+      }))
+      .sort((a, b) => b.lastActiveAt.getTime() - a.lastActiveAt.getTime())
+  }
+
+  /** Active sessions for a user (one entry per device); `current` flags the caller's own. */
+  async listActiveSessions(userId: string, email: string, currentToken?: string): Promise<ActiveSession[]> {
+    try {
+      return await this.postgresRepo.listActiveSessions(userId, currentToken)
+    } catch (error) {
+      console.warn('Postgres session listing failed, using fallback cache:', error)
+      return this.fallbackActive(email, currentToken)
+    }
+  }
+
+  /**
+   * Revoke one of the user's own sessions plus its refresh-token family.
+   * Returns false when the session does not exist or belongs to someone else.
+   */
+  async revokeSession(userId: string, email: string, sessionId: string): Promise<boolean> {
+    const families = new Set<string>()
+    let found = false
+
+    try {
+      const result = await this.postgresRepo.revokeSession(userId, sessionId)
+      if (result) {
+        found = true
+        result.families.forEach((f) => families.add(f))
+      }
+    } catch (error) {
+      console.warn('Postgres session revocation failed, using fallback cache:', error)
+    }
+
+    const target = [...this.fallbackCache.values()].find(
+      (s) => s.email === email && (s as Session & FallbackSessionMeta).id === sessionId,
+    ) as (Session & FallbackSessionMeta) | undefined
+    if (target) {
+      found = true
+      if (target.family) families.add(target.family)
+      for (const [token, s] of this.fallbackCache.entries()) {
+        const meta = s as Session & FallbackSessionMeta
+        if (s.email === email && (meta.id === sessionId || (target.family && meta.family === target.family))) {
+          this.fallbackCache.delete(token)
+        }
+      }
+    }
+
+    for (const family of families) await refreshTokenStore.invalidateFamily(family)
+    return found
+  }
+
+  /** Revoke every session (and refresh token) for a user, optionally sparing one device. */
+  async revokeAllSessions(
+    userId: string,
+    email: string,
+    options: { exceptSessionId?: string } = {},
+  ): Promise<number> {
+    const { exceptSessionId } = options
+    let exceptFamily: string | undefined
+    if (exceptSessionId) {
+      const active = await this.listActiveSessions(userId, email)
+      exceptFamily = active.find((s) => s.id === exceptSessionId)?.family ?? undefined
+    }
+
+    let count = 0
+    try {
+      const result = await this.postgresRepo.revokeAllSessions(userId, { exceptSessionId })
+      count = result.count
+    } catch (error) {
+      console.warn('Postgres session revocation failed, using fallback cache:', error)
+    }
+
+    let fallbackCount = 0
+    for (const [token, s] of this.fallbackCache.entries()) {
+      const meta = s as Session & FallbackSessionMeta
+      if (s.email !== email) continue
+      if (exceptSessionId && (meta.id === exceptSessionId || (exceptFamily && meta.family === exceptFamily))) continue
+      this.fallbackCache.delete(token)
+      fallbackCount++
+    }
+
+    await refreshTokenStore.invalidateAllByUserId(userId, exceptFamily)
+    return Math.max(count, fallbackCount)
+  }
+
   clear(): void {
     this.fallbackCache.clear()
   }
@@ -446,10 +573,10 @@ class RefreshTokenStore {
     return count
   }
 
-  async invalidateAllByUserId(userId: string): Promise<number> {
+  async invalidateAllByUserId(userId: string, exceptFamily?: string): Promise<number> {
     let count = 0
     for (const record of this.records.values()) {
-      if (record.userId === userId && record.usedAt === null) {
+      if (record.userId === userId && record.usedAt === null && record.family !== exceptFamily) {
         record.usedAt = new Date()
         count++
       }

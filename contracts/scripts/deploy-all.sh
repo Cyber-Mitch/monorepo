@@ -123,7 +123,6 @@ invoke_init() {
 TRANSACTION_RECEIPT_ID="$(deploy_contract transaction-receipt-contract transaction_receipt)"
 STAKING_POOL_ID="$(deploy_contract staking_pool staking_pool)"
 STAKING_REWARDS_ID="$(deploy_contract staking_rewards staking_rewards)"
-VESTING_SCHEDULE_ID="$(deploy_contract vesting_schedule vesting_schedule)"
 
 echo "Initializing transaction-receipt-contract..."
 invoke_init "$TRANSACTION_RECEIPT_ID" "$ADMIN_IDENTITY" \
@@ -139,14 +138,6 @@ echo "Initializing staking_rewards..."
 invoke_init "$STAKING_REWARDS_ID" "$ADMIN_IDENTITY" \
   --admin "$ADMIN_ADDR"
 
-echo "Initializing vesting_schedule..."
-stellar contract invoke \
-  --id "$VESTING_SCHEDULE_ID" \
-  --source-account "$ADMIN_IDENTITY" \
-  --network "$NETWORK" \
-  --send=yes \
-  -- \
-  initialize --admin "$ADMIN_ADDR" --token "$USDC_TOKEN_ID" > /dev/null
 
 ENV_SNIPPET="$(cat <<EOF
 # backend/.env
@@ -156,7 +147,6 @@ SOROBAN_CONTRACT_ID=$TRANSACTION_RECEIPT_ID
 SOROBAN_USDC_TOKEN_ID=$USDC_TOKEN_ID
 SOROBAN_STAKING_POOL_ID=$STAKING_POOL_ID
 SOROBAN_STAKING_REWARDS_ID=$STAKING_REWARDS_ID
-SOROBAN_VESTING_SCHEDULE_ID=$VESTING_SCHEDULE_ID
 # Optional (use operator identity secret):
 # SOROBAN_ADMIN_SECRET=$(stellar keys secret "$OPERATOR_IDENTITY")
 EOF
@@ -168,7 +158,6 @@ echo "  TRANSACTION_RECEIPT_ID=$TRANSACTION_RECEIPT_ID"
 echo "  USDC_TOKEN_ID=$USDC_TOKEN_ID"
 echo "  STAKING_POOL_ID=$STAKING_POOL_ID"
 echo "  STAKING_REWARDS_ID=$STAKING_REWARDS_ID"
-echo "  VESTING_SCHEDULE_ID=$VESTING_SCHEDULE_ID"
 echo ""
 echo "$ENV_SNIPPET"
 

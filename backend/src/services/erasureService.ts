@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { getPool } from '../db.js'
 import { logger } from '../utils/logger.js'
+import { auditLog } from '../utils/auditLogger.js'
+import type {
+  ErasureRequestStore,
+  ListErasureRequestsFilter,
+} from '../models/erasureRequestStore.js'
 
 export type ErasureRequestStatus = 'pending' | 'completed' | 'cancelled' | 'expired'
 
@@ -14,13 +19,29 @@ export interface ErasureRequest {
   confirmedBy: string | null
 }
 
-const ERASURE_CONFIRM_DAYS = 30
+export const ERASURE_CONFIRM_DAYS = 30
+
+/** Audit a pending request lapsing past confirm_by (system actor). */
+export function auditErasureExpired(requestId: string, userId: string): void {
+  auditLog(
+    'USER_ERASURE_EXPIRED',
+    { userId, requestId: 'unknown', ip: 'unknown', actorType: 'system' },
+    { erasureRequestId: requestId },
+  )
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505'
+}
 
 function erasedToken(): string {
   return `[ERASED_${randomUUID()}]`
 }
 
-export class ErasureService {
+/**
+ * PostgreSQL-backed erasure request store (see models/erasureRequestStore.ts).
+ */
+export class ErasureService implements ErasureRequestStore {
   private async pool() {
     const pool = await getPool()
     if (!pool) throw new Error('Database not configured')
@@ -39,13 +60,61 @@ export class ErasureService {
     }
 
     const confirmBy = new Date(Date.now() + ERASURE_CONFIRM_DAYS * 24 * 60 * 60 * 1000)
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO erasure_requests (user_id, confirm_by)
+         VALUES ($1, $2)
+         RETURNING *`,
+        [userId, confirmBy],
+      )
+      return this.mapRow(rows[0])
+    } catch (err) {
+      // erasure_requests_one_pending_per_user_uidx closes the check-then-insert race
+      if (isUniqueViolation(err)) throw new Error('ERASURE_ALREADY_PENDING')
+      throw err
+    }
+  }
+
+  async findLatestByUserId(userId: string): Promise<ErasureRequest | null> {
+    const pool = await this.pool()
     const { rows } = await pool.query(
-      `INSERT INTO erasure_requests (user_id, confirm_by)
-       VALUES ($1, $2)
-       RETURNING *`,
-      [userId, confirmBy],
+      `SELECT * FROM erasure_requests WHERE user_id = $1 ORDER BY requested_at DESC LIMIT 1`,
+      [userId],
     )
-    return this.mapRow(rows[0])
+    return rows.length > 0 ? this.mapRow(rows[0]) : null
+  }
+
+  async list(
+    filter: ListErasureRequestsFilter = {},
+  ): Promise<{ requests: ErasureRequest[]; total: number }> {
+    const pool = await this.pool()
+    const status = filter.status ?? null
+    const { rows } = await pool.query(
+      `SELECT * FROM erasure_requests
+       WHERE ($1::text IS NULL OR status = $1)
+       ORDER BY requested_at DESC
+       LIMIT $2 OFFSET $3`,
+      [status, filter.limit ?? 50, filter.offset ?? 0],
+    )
+    const count = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM erasure_requests WHERE ($1::text IS NULL OR status = $1)`,
+      [status],
+    )
+    return {
+      requests: rows.map((row: Record<string, unknown>) => this.mapRow(row)),
+      total: Number(count.rows[0]?.total ?? 0),
+    }
+  }
+
+  async cancelErasure(requestId: string): Promise<ErasureRequest | null> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `UPDATE erasure_requests SET status = 'cancelled', updated_at = NOW()
+       WHERE id = $1 AND status = 'pending'
+       RETURNING *`,
+      [requestId],
+    )
+    return rows.length > 0 ? this.mapRow(rows[0]) : null
   }
 
   async findPendingByUserId(userId: string): Promise<ErasureRequest | null> {
@@ -206,11 +275,15 @@ export class ErasureService {
 
   async expireOverdueRequests(now = new Date()): Promise<number> {
     const pool = await this.pool()
-    const { rowCount } = await pool.query(
+    const { rows, rowCount } = await pool.query(
       `UPDATE erasure_requests SET status = 'expired', updated_at = NOW()
-       WHERE status = 'pending' AND confirm_by < $1`,
+       WHERE status = 'pending' AND confirm_by < $1
+       RETURNING id, user_id`,
       [now],
     )
+    for (const row of rows ?? []) {
+      auditErasureExpired(row.id as string, row.user_id as string)
+    }
     return rowCount ?? 0
   }
 

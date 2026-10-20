@@ -1,220 +1,215 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { listPayoutScheduleSchema, DELAY_REASON_LABELS, DEDUCTION_TYPE_LABELS, PAYOUT_STATUS_LABELS, PAYOUT_CHANNEL_LABELS } from '../schemas/landlordPayoutSchedule.js'
-import { InMemoryLandlordPayoutScheduleStore, groupPayouts, computeSummary } from '../models/landlordPayoutScheduleStore.js'
+import request from 'supertest'
+import express from 'express'
+import { createLandlordPayoutScheduleRouter } from './landlordPayoutSchedule.js'
+import { errorHandler } from '../middleware/errorHandler.js'
+import { requestIdMiddleware } from '../middleware/requestId.js'
+import { sessionStore, userStore } from '../models/authStore.js'
+import {
+  InMemoryLandlordPayoutScheduleStore,
+  initLandlordPayoutScheduleStore,
+} from '../models/landlordPayoutScheduleStore.js'
 import type { LandlordPayout } from '../schemas/landlordPayoutSchedule.js'
 
-function makePayout(overrides: Partial<LandlordPayout> = {}): LandlordPayout {
+function buildApp(): express.Express {
+  const app = express()
+  app.use(requestIdMiddleware)
+  app.use(express.json())
+  app.use('/api/v1/landlord/payout-schedule', createLandlordPayoutScheduleRouter())
+  app.use(errorHandler)
+  return app
+}
+
+const auth = (token: string) => ({ Authorization: `Bearer ${token}` })
+
+function payout(id: string, landlordId: string, overrides: Partial<LandlordPayout> = {}): LandlordPayout {
+  const stamp = '2026-01-10T09:00:00.000Z'
   return {
-    id: `PAY-${Math.random().toString(36).slice(2, 8)}`,
-    landlordId: 'landlord-1',
+    id,
+    landlordId,
     propertyId: 'prop-1',
-    propertyName: 'Lagos Apartment',
-    scheduledDate: '2025-04-15T00:00:00Z',
+    propertyName: 'Lekki Flat',
+    scheduledDate: stamp,
     completedDate: null,
-    grossAmount: 500000,
-    deductions: [{ type: 'platform_fee', label: 'Platform Fee', amount: 25000 }],
-    netAmount: 475000,
+    grossAmount: 1000,
+    deductions: [{ type: 'platform_fee', label: 'Platform Fee', amount: 100 }],
+    netAmount: 900,
     currency: 'NGN',
     status: 'scheduled',
     channel: 'bank_transfer',
     delayReasons: [],
-    periodStart: '2025-04-01T00:00:00Z',
-    periodEnd: '2025-04-30T00:00:00Z',
-    createdAt: '2025-03-28T00:00:00Z',
-    updatedAt: '2025-03-28T00:00:00Z',
+    periodStart: '2026-01-01T00:00:00.000Z',
+    periodEnd: '2026-01-31T23:59:59.999Z',
+    createdAt: stamp,
+    updatedAt: stamp,
     ...overrides,
   }
 }
 
-describe('Landlord Payout Schedule - Schema', () => {
-  it('validates list schedule query with defaults', () => {
-    const result = listPayoutScheduleSchema.safeParse({})
-    expect(result.success).toBe(true)
-    if (result.success) {
-      expect(result.data.grouping).toBe('monthly')
-      expect(result.data.page).toBe(1)
-      expect(result.data.pageSize).toBe(20)
-    }
-  })
-
-  it('parses status and channel filters', () => {
-    const result = listPayoutScheduleSchema.safeParse({ status: 'delayed', channel: 'mobile_money' })
-    expect(result.success).toBe(true)
-    if (result.success) {
-      expect(result.data.status).toBe('delayed')
-      expect(result.data.channel).toBe('mobile_money')
-    }
-  })
-
-  it('parses weekly grouping', () => {
-    const result = listPayoutScheduleSchema.safeParse({ grouping: 'weekly' })
-    expect(result.success).toBe(true)
-    if (result.success) expect(result.data.grouping).toBe('weekly')
-  })
-
-  it('rejects invalid status', () => {
-    const result = listPayoutScheduleSchema.safeParse({ status: 'invalid' })
-    expect(result.success).toBe(false)
-  })
-
-  it('provides label maps for all enum values', () => {
-    expect(Object.keys(DELAY_REASON_LABELS).length).toBeGreaterThan(0)
-    expect(Object.keys(DEDUCTION_TYPE_LABELS).length).toBeGreaterThan(0)
-    expect(Object.keys(PAYOUT_STATUS_LABELS).length).toBeGreaterThan(0)
-    expect(Object.keys(PAYOUT_CHANNEL_LABELS).length).toBeGreaterThan(0)
-  })
-})
-
-describe('Landlord Payout Preferences API', () => {
-  it('persists and retrieves payout schedule preference', async () => {
-    const store = new InMemoryLandlordPayoutScheduleStore()
-    await store.savePreference('landlord-1', 'weekly')
-    const pref = await store.getPreference('landlord-1')
-    expect(pref).toBe('weekly')
-  })
-})
-
-describe('groupPayouts', () => {
-  it('groups payouts by month', () => {
-    const payouts = [
-      makePayout({ scheduledDate: '2025-04-10T00:00:00Z', periodStart: '2025-04-01T00:00:00Z', periodEnd: '2025-04-30T00:00:00Z' }),
-      makePayout({ scheduledDate: '2025-04-20T00:00:00Z', periodStart: '2025-04-01T00:00:00Z', periodEnd: '2025-04-30T00:00:00Z' }),
-      makePayout({ scheduledDate: '2025-05-15T00:00:00Z', periodStart: '2025-05-01T00:00:00Z', periodEnd: '2025-05-31T00:00:00Z' }),
-    ]
-    const periods = groupPayouts(payouts, 'monthly')
-    expect(periods).toHaveLength(2)
-    expect(periods[0].periodLabel).toBe('2025-04')
-    expect(periods[0].payoutCount).toBe(2)
-    expect(periods[1].periodLabel).toBe('2025-05')
-    expect(periods[1].payoutCount).toBe(1)
-  })
-
-  it('groups payouts by week', () => {
-    const payouts = [
-      makePayout({ scheduledDate: '2025-04-07T00:00:00Z' }),
-      makePayout({ scheduledDate: '2025-04-14T00:00:00Z' }),
-    ]
-    const periods = groupPayouts(payouts, 'weekly')
-    expect(periods.length).toBeGreaterThanOrEqual(2)
-  })
-
-  it('computes period totals correctly', () => {
-    const payouts = [
-      makePayout({ grossAmount: 300000, deductions: [{ type: 'platform_fee', label: 'Fee', amount: 15000 }], netAmount: 285000 }),
-      makePayout({ grossAmount: 200000, deductions: [{ type: 'tax_withholding', label: 'Tax', amount: 10000 }], netAmount: 190000 }),
-    ]
-    const periods = groupPayouts(payouts, 'monthly')
-    expect(periods[0].grossTotal).toBe(500000)
-    expect(periods[0].deductionsTotal).toBe(25000)
-    expect(periods[0].netTotal).toBe(475000)
-  })
-
-  it('counts delayed payouts in period', () => {
-    const payouts = [
-      makePayout({ status: 'delayed', delayReasons: ['bank_processing'] }),
-      makePayout({ status: 'scheduled' }),
-    ]
-    const periods = groupPayouts(payouts, 'monthly')
-    expect(periods[0].delayedCount).toBe(1)
-  })
-})
-
-describe('computeSummary', () => {
-  it('computes summary from empty list', () => {
-    const summary = computeSummary([])
-    expect(summary.totalGross).toBe(0)
-    expect(summary.totalDeductions).toBe(0)
-    expect(summary.totalNet).toBe(0)
-    expect(summary.totalPayouts).toBe(0)
-    expect(summary.delayedPayouts).toBe(0)
-    expect(summary.onHoldPayouts).toBe(0)
-    expect(summary.currency).toBe('NGN')
-  })
-
-  it('computes summary with delayed and on-hold counts', () => {
-    const payouts = [
-      makePayout({ status: 'delayed' }),
-      makePayout({ status: 'on_hold' }),
-      makePayout({ status: 'completed' }),
-    ]
-    const summary = computeSummary(payouts)
-    expect(summary.totalPayouts).toBe(3)
-    expect(summary.delayedPayouts).toBe(1)
-    expect(summary.onHoldPayouts).toBe(1)
-  })
-})
-
-describe('InMemoryLandlordPayoutScheduleStore', () => {
+describe('Landlord payout schedule routes (#1892)', () => {
+  let app: express.Express
   let store: InMemoryLandlordPayoutScheduleStore
+  let landlordId: string
+  let landlordToken: string
+  let otherLandlordId: string
+  let otherLandlordToken: string
+  let tenantToken: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new InMemoryLandlordPayoutScheduleStore()
+    initLandlordPayoutScheduleStore(store)
+    sessionStore.clear()
+    userStore.clear()
+    app = buildApp()
+
+    const landlord = await userStore.getOrCreateByEmail('payout-landlord@example.com')
+    landlord.role = 'landlord'
+    landlordId = landlord.id
+    landlordToken = 'test-token-payout-landlord'
+    await sessionStore.create(landlord.email, landlordToken)
+
+    const other = await userStore.getOrCreateByEmail('payout-other-landlord@example.com')
+    other.role = 'landlord'
+    otherLandlordId = other.id
+    otherLandlordToken = 'test-token-payout-other-landlord'
+    await sessionStore.create(other.email, otherLandlordToken)
+
+    const tenant = await userStore.getOrCreateByEmail('payout-tenant@example.com')
+    tenantToken = 'test-token-payout-tenant'
+    await sessionStore.create(tenant.email, tenantToken)
   })
 
-  it('lists payouts scoped to landlord', async () => {
-    store.seed(makePayout({ landlordId: 'l1' }))
-    store.seed(makePayout({ landlordId: 'l2' }))
-    const result = await store.listPayouts('l1')
-    expect(result.payouts).toHaveLength(1)
-    expect(result.total).toBe(1)
+  it('requires authentication', async () => {
+    const res = await request(app).get('/api/v1/landlord/payout-schedule')
+    expect(res.status).toBe(401)
   })
 
-  it('filters by status', async () => {
-    store.seed(makePayout({ landlordId: 'l1', status: 'delayed' }))
-    store.seed(makePayout({ landlordId: 'l1', status: 'completed' }))
-    const result = await store.listPayouts('l1', { status: 'delayed' })
-    expect(result.payouts).toHaveLength(1)
-    expect(result.payouts[0].status).toBe('delayed')
+  it('forbids a non-landlord caller', async () => {
+    const res = await request(app).get('/api/v1/landlord/payout-schedule').set(auth(tenantToken))
+    expect(res.status).toBe(403)
   })
 
-  it('filters by channel', async () => {
-    store.seed(makePayout({ landlordId: 'l1', channel: 'bank_transfer' }))
-    store.seed(makePayout({ landlordId: 'l1', channel: 'mobile_money' }))
-    const result = await store.listPayouts('l1', { channel: 'mobile_money' })
-    expect(result.payouts).toHaveLength(1)
+  describe('GET /api/v1/landlord/payout-schedule', () => {
+    it('returns periods and a summary for the landlord only', async () => {
+      store.add(payout('PAY-1', landlordId, { scheduledDate: '2026-01-10T09:00:00.000Z' }))
+      store.add(payout('PAY-2', landlordId, {
+        scheduledDate: '2026-02-03T09:00:00.000Z',
+        status: 'delayed',
+        delayReasons: ['bank_processing'],
+      }))
+      store.add(payout('PAY-OTHER', otherLandlordId, { scheduledDate: '2026-01-11T09:00:00.000Z' }))
+
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule?grouping=monthly')
+        .set(auth(landlordToken))
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.periods.map((p: { periodLabel: string }) => p.periodLabel)).toEqual([
+        '2026-01',
+        '2026-02',
+      ])
+      expect(res.body.data.summary).toMatchObject({
+        totalGross: 2000,
+        totalDeductions: 200,
+        totalNet: 1800,
+        totalPayouts: 2,
+        delayedPayouts: 1,
+      })
+    })
+
+    it('applies the status filter before grouping and summing', async () => {
+      store.add(payout('PAY-1', landlordId, { status: 'completed' }))
+      store.add(payout('PAY-2', landlordId, { status: 'on_hold' }))
+
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule?status=on_hold')
+        .set(auth(landlordToken))
+
+      expect(res.body.data.summary.totalPayouts).toBe(1)
+      expect(res.body.data.periods[0].payouts.map((p: { id: string }) => p.id)).toEqual(['PAY-2'])
+    })
+
+    it('rejects an unknown grouping value', async () => {
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule?grouping=daily')
+        .set(auth(landlordToken))
+      expect(res.status).toBe(400)
+    })
   })
 
-  it('filters by date range', async () => {
-    store.seed(makePayout({ landlordId: 'l1', scheduledDate: '2025-04-15T00:00:00Z' }))
-    store.seed(makePayout({ landlordId: 'l1', scheduledDate: '2025-05-15T00:00:00Z' }))
-    const result = await store.listPayouts('l1', { from: '2025-05-01T00:00:00Z', to: '2025-05-31T00:00:00Z' })
-    expect(result.payouts).toHaveLength(1)
+  describe('GET /api/v1/landlord/payout-schedule/payouts', () => {
+    it('paginates and reports totals', async () => {
+      for (let i = 1; i <= 5; i++) {
+        store.add(payout(`PAY-${i}`, landlordId, {
+          scheduledDate: `2026-01-${String(i).padStart(2, '0')}T09:00:00.000Z`,
+        }))
+      }
+
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule/payouts?page=2&pageSize=2')
+        .set(auth(landlordToken))
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.map((p: { id: string }) => p.id)).toEqual(['PAY-3', 'PAY-4'])
+      expect(res.body.pagination).toEqual({ total: 5, page: 2, pageSize: 2, totalPages: 3 })
+    })
+
+    it('rejects page 0', async () => {
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule/payouts?page=0')
+        .set(auth(landlordToken))
+      expect(res.status).toBe(400)
+    })
   })
 
-  it('paginates results', async () => {
-    for (let i = 0; i < 5; i++) store.seed(makePayout({ landlordId: 'l1' }))
-    const page1 = await store.listPayouts('l1', { page: 1, pageSize: 2 })
-    expect(page1.payouts).toHaveLength(2)
-    expect(page1.total).toBe(5)
-    const page3 = await store.listPayouts('l1', { page: 3, pageSize: 2 })
-    expect(page3.payouts).toHaveLength(1)
+  describe('GET /api/v1/landlord/payout-schedule/:payoutId', () => {
+    it('returns the payout to its landlord', async () => {
+      store.add(payout('PAY-1', landlordId))
+
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule/PAY-1')
+        .set(auth(landlordToken))
+
+      expect(res.status).toBe(200)
+      expect(res.body.data).toMatchObject({ id: 'PAY-1', landlordId, netAmount: 900 })
+    })
+
+    it('returns 404 for another landlord\'s payout', async () => {
+      store.add(payout('PAY-OTHER', otherLandlordId))
+
+      const res = await request(app)
+        .get('/api/v1/landlord/payout-schedule/PAY-OTHER')
+        .set(auth(landlordToken))
+
+      expect(res.status).toBe(404)
+    })
   })
 
-  it('finds payout by id with ownership check', async () => {
-    const p = makePayout({ landlordId: 'l1' })
-    store.seed(p)
-    const found = await store.getPayoutById(p.id, 'l1')
-    expect(found).toBeTruthy()
-    const notFound = await store.getPayoutById(p.id, 'l2')
-    expect(notFound).toBeNull()
-  })
+  describe('schedule preference', () => {
+    it('defaults to monthly and round-trips an update', async () => {
+      const before = await request(app)
+        .get('/api/v1/landlord/payout-schedule/preference')
+        .set(auth(landlordToken))
+      expect(before.body.data).toEqual({ schedulePreference: 'monthly' })
 
-  it('returns schedule with grouped periods and summary', async () => {
-    store.seed(makePayout({ landlordId: 'l1', scheduledDate: '2025-04-10T00:00:00Z', grossAmount: 300000, netAmount: 285000, deductions: [{ type: 'platform_fee', label: 'Fee', amount: 15000 }] }))
-    store.seed(makePayout({ landlordId: 'l1', scheduledDate: '2025-04-20T00:00:00Z', grossAmount: 200000, netAmount: 190000, deductions: [{ type: 'tax_withholding', label: 'Tax', amount: 10000 }], status: 'delayed', delayReasons: ['bank_processing'] }))
-    const result = await store.getSchedule('l1', { grouping: 'monthly' })
-    expect(result.periods).toHaveLength(1)
-    expect(result.periods[0].grossTotal).toBe(500000)
-    expect(result.periods[0].delayedCount).toBe(1)
-    expect(result.summary.totalGross).toBe(500000)
-    expect(result.summary.delayedPayouts).toBe(1)
-  })
+      const put = await request(app)
+        .put('/api/v1/landlord/payout-schedule/preference')
+        .set(auth(landlordToken))
+        .send({ schedulePreference: 'weekly' })
+      expect(put.status).toBe(200)
 
-  it('schedule filters apply before grouping', async () => {
-    store.seed(makePayout({ landlordId: 'l1', status: 'completed' }))
-    store.seed(makePayout({ landlordId: 'l1', status: 'delayed' }))
-    const result = await store.getSchedule('l1', { status: 'delayed' })
-    expect(result.summary.totalPayouts).toBe(1)
-    expect(result.periods[0].payoutCount).toBe(1)
+      const after = await request(app)
+        .get('/api/v1/landlord/payout-schedule/preference')
+        .set(auth(landlordToken))
+      expect(after.body.data).toEqual({ schedulePreference: 'weekly' })
+    })
+
+    it('rejects an unknown preference', async () => {
+      const res = await request(app)
+        .put('/api/v1/landlord/payout-schedule/preference')
+        .set(auth(landlordToken))
+        .send({ schedulePreference: 'daily' })
+      expect(res.status).toBe(400)
+    })
   })
 })

@@ -66,37 +66,6 @@ export class TestSorobanAdapter extends StubSorobanAdapter {
     return super.cancelTimelock(txHash)
   }
 
-  // governance (issue #1494) — same fault-injection treatment as the other
-  // chain-bound calls so route-level retry/error handling can be exercised.
-  async createProposal(
-    params: Parameters<StubSorobanAdapter['createProposal']>[0],
-  ): ReturnType<StubSorobanAdapter['createProposal']> {
-    this.maybeSimulateRpcTimeout()
-    return super.createProposal(params)
-  }
-
-  async vote(
-    params: Parameters<StubSorobanAdapter['vote']>[0],
-  ): ReturnType<StubSorobanAdapter['vote']> {
-    this.maybeSimulateRpcTimeout()
-    return super.vote(params)
-  }
-
-  async submitGovernanceTransaction(signedXdr: string): Promise<{ txHash: string }> {
-    this.maybeSimulateRpcTimeout()
-    return super.submitGovernanceTransaction(signedXdr)
-  }
-
-  async finalizeProposal(proposalId: number): Promise<string> {
-    this.maybeSimulateRpcTimeout()
-    return super.finalizeProposal(proposalId)
-  }
-
-  async executeProposal(proposalId: number): Promise<string> {
-    this.maybeSimulateRpcTimeout()
-    return super.executeProposal(proposalId)
-  }
-
   /**
    * Records a receipt and tracks the call for test inspection.
    * Can simulate transient failures or duplicate receipt errors based on configuration.

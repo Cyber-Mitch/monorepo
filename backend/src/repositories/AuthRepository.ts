@@ -49,6 +49,17 @@ export interface Session {
   createdAt: Date
 }
 
+export interface ActiveSession {
+  id: string
+  family: string | null
+  createdAt: Date
+  lastActiveAt: Date
+  expiresAt: Date
+  ip: string | null
+  userAgent: string | null
+  current: boolean
+}
+
 export interface WalletChallenge {
   address: string
   challengeXdr: string
@@ -344,7 +355,13 @@ export class PostgresSessionRepository {
     return createHash('sha256').update(token).digest('hex')
   }
 
-  async create(email: string, token: string, expiresAt?: Date, auditInfo?: { ip?: string; userAgent?: string }): Promise<void> {
+  async create(
+    email: string,
+    token: string,
+    expiresAt?: Date,
+    auditInfo?: { ip?: string; userAgent?: string },
+    link?: { id?: string; family?: string },
+  ): Promise<void> {
     const pool = await this.pool()
     const tokenHash = this.hashToken(token)
 
@@ -357,9 +374,9 @@ export class PostgresSessionRepository {
 
     const defaultExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
     await pool.query(
-      `INSERT INTO sessions (token_hash, user_id, expires_at, created_ip, user_agent)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [tokenHash, user.id, expiresAt || defaultExpiresAt, auditInfo?.ip, auditInfo?.userAgent]
+      `INSERT INTO sessions (id, token_hash, user_id, expires_at, created_ip, user_agent, family)
+       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7)`,
+      [link?.id ?? null, tokenHash, user.id, expiresAt || defaultExpiresAt, auditInfo?.ip, auditInfo?.userAgent, link?.family ?? null]
     )
   }
 
@@ -423,6 +440,96 @@ export class PostgresSessionRepository {
       `UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`,
       [userId]
     )
+  }
+
+  /**
+   * Active (unrevoked, unexpired) sessions for a user. Sessions that share a
+   * refresh-token family are one device: only the newest is returned.
+   * `current` is true for the device that owns `currentToken`.
+   */
+  async listActiveSessions(userId: string, currentToken?: string): Promise<ActiveSession[]> {
+    const pool = await this.pool()
+    const currentHash = currentToken ? this.hashToken(currentToken) : null
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (COALESCE(s.family, s.id::text))
+              s.id, s.family, s.created_at, s.last_active_at, s.expires_at, s.created_ip, s.user_agent,
+              EXISTS (
+                SELECT 1 FROM sessions c
+                WHERE c.token_hash = $2
+                  AND c.user_id = s.user_id
+                  AND (c.id = s.id OR (c.family IS NOT NULL AND c.family = s.family))
+              ) AS current
+       FROM sessions s
+       WHERE s.user_id = $1
+         AND s.revoked_at IS NULL
+         AND s.forced_logout_at IS NULL
+         AND s.deleted_at IS NULL
+         AND s.expires_at > NOW()
+       ORDER BY COALESCE(s.family, s.id::text), s.created_at DESC`,
+      [userId, currentHash],
+    )
+    return rows
+      .map((row: any) => ({
+        id: row.id,
+        family: row.family ?? null,
+        createdAt: row.created_at,
+        lastActiveAt: row.last_active_at,
+        expiresAt: row.expires_at,
+        ip: row.created_ip ?? null,
+        userAgent: row.user_agent ?? null,
+        current: Boolean(row.current),
+      }))
+      .sort((a: ActiveSession, b: ActiveSession) => b.lastActiveAt.getTime() - a.lastActiveAt.getTime())
+  }
+
+  /**
+   * Revoke one of the user's sessions (and every session in its refresh family).
+   * Returns the affected refresh families, or null if the session is not the user's.
+   */
+  async revokeSession(userId: string, sessionId: string): Promise<{ families: string[] } | null> {
+    const pool = await this.pool()
+    const { rows: owned } = await pool.query(
+      `SELECT family FROM sessions WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [sessionId, userId],
+    )
+    if (owned.length === 0) return null
+
+    const family: string | null = owned[0].family ?? null
+    await pool.query(
+      `UPDATE sessions SET revoked_at = NOW()
+       WHERE user_id = $1 AND revoked_at IS NULL AND (id = $2 OR ($3::text IS NOT NULL AND family = $3))`,
+      [userId, sessionId, family],
+    )
+    return { families: family ? [family] : [] }
+  }
+
+  /**
+   * Revoke all of a user's sessions, optionally sparing the device owning
+   * `exceptSessionId`. Returns the revoked count and affected refresh families.
+   */
+  async revokeAllSessions(
+    userId: string,
+    options: { exceptSessionId?: string } = {},
+  ): Promise<{ count: number; families: string[] }> {
+    const pool = await this.pool()
+    const except = options.exceptSessionId ?? null
+    const { rows } = await pool.query(
+      `UPDATE sessions SET revoked_at = NOW(), forced_logout_at = NOW()
+       WHERE user_id = $1
+         AND revoked_at IS NULL
+         AND deleted_at IS NULL
+         AND (
+           $2::uuid IS NULL
+           OR (
+             id <> $2::uuid
+             AND (family IS NULL OR family IS DISTINCT FROM (SELECT family FROM sessions WHERE id = $2::uuid))
+           )
+         )
+       RETURNING family`,
+      [userId, except],
+    )
+    const families = [...new Set(rows.map((r: any) => r.family).filter(Boolean))] as string[]
+    return { count: rows.length, families }
   }
 
   async cleanupExpired(): Promise<number> {

@@ -18,3 +18,11 @@ export const walletVerifySchema = z.object({
   address: z.string().regex(/^G[A-Z0-9]{55}$/, 'Invalid Stellar public key'),
   signedChallengeXdr: z.string(),
 })
+
+export const sessionIdParamSchema = z.object({
+  id: z.string().uuid(),
+})
+
+export const revokeSessionsQuerySchema = z.object({
+  others: z.enum(['true', 'false']).optional(),
+})

@@ -1,113 +1,110 @@
-import { apiFetch } from "./api";
+import { apiGet, apiPost } from "./apiClient";
 
 /**
- * Client for the stake-weighted governance API (contracts/governance, issue #1494).
+ * Governance API (#1912, #1925).
  *
- * Distinct from `timelockApi.ts` — that wraps the *timelock* admin queue, an
- * unrelated contract that merely reuses "governance" as its event-topic name.
+ * Creating a proposal and voting are two-step: `prepare` returns an unsigned
+ * XDR, the user signs it in their wallet, then `submit` sends the signed XDR.
+ * Finalize and execute need no user signature; the server pays the fee.
  *
- * `create_proposal` and `vote` call `require_auth()` on-chain for the
- * proposer/voter, so this backend cannot sign those on a user's behalf. Both
- * follow a prepare -> sign (with the connected wallet) -> submit flow:
- * the `prepare*` calls return an unsigned XDR envelope, the caller signs it
- * client-side (see `useWallet().signTransaction`), and the signed envelope is
- * posted to the matching `submit*` endpoint.
- *
- * Paths below intentionally omit the `/api` prefix used elsewhere in this
- * directory (e.g. `lib/timelockApi.ts`, `lib/config.ts`'s staking calls) —
- * `apiFetch` already prepends `/api/v1`, and the governance router is mounted
- * at `/api/v1/governance` (backend/src/app.ts), not `/api/v1/api/...`. Several
- * existing sibling clients pass an extra leading `/api`, which — given
- * apiFetch's fixed `${baseUrl}/api/v1${path}` construction — cannot resolve to
- * any route this backend actually mounts; that looks like a pre-existing
- * inconsistency and is out of scope to fix here (see the PR description).
+ * Paths are passed to apiFetch without `/api` (see referralsApi.ts, #1878).
  */
 
-export type GovernanceProposalStatus = "Active" | "Passed" | "Rejected" | "Executed" | "Cancelled";
+export type ProposalStatus = "active" | "passed" | "failed" | "executed";
 
-export interface GovernanceProposal {
-  id: number;
-  proposer: string;
-  paramKey: string;
-  currentValue: string;
+export interface Proposal {
+  id: string;
+  parameterKey: string;
   proposedValue: string;
-  votesFor: string;
-  votesAgainst: string;
-  status: GovernanceProposalStatus;
-  createdAt: number;
-  votingEndsAt: number;
-  snapshottedTotalStaked: string;
+  status: ProposalStatus;
+  votesFor: number;
+  votesAgainst: number;
+  /** Votes needed for the proposal to reach quorum. */
+  quorumVotes: number;
+  /** ISO timestamp for when voting closes. */
+  votingEndsAt: string;
+  /** Set when the connected wallet has already voted on this proposal. */
+  hasVoted?: boolean;
+  /** Server-computed: the time conditions for finalize or execute are met. */
+  canFinalize?: boolean;
+  canExecute?: boolean;
 }
 
-interface ProposalListResponse {
-  success: boolean;
-  proposals: GovernanceProposal[];
-  count: number;
+export interface ProposalListResponse {
+  proposals: Proposal[];
+  pagination: { total: number; page: number; limit: number; totalPages: number };
 }
 
-interface ProposalResponse {
-  success: boolean;
-  proposal: GovernanceProposal;
-}
-
-interface UnsignedTxResponse {
-  success: boolean;
+export interface PrepareResponse {
   xdr: string;
 }
 
-interface TxHashResponse {
-  success: boolean;
+export interface SubmitResponse {
   txHash: string;
 }
 
-export function listProposals(): Promise<GovernanceProposal[]> {
-  return apiFetch<ProposalListResponse>("/governance/proposals").then((res) => res.proposals);
+export interface GovernanceConfig {
+  /** Stake a wallet needs before it can create a proposal. */
+  minStakeToPropose: number;
 }
 
-export function getProposal(id: number): Promise<GovernanceProposal> {
-  return apiFetch<ProposalResponse>(`/governance/proposals/${id}`).then((res) => res.proposal);
+export async function listProposals(
+  params: { status?: ProposalStatus | "all"; page?: number } = {},
+): Promise<ProposalListResponse> {
+  const search = new URLSearchParams();
+  if (params.status && params.status !== "all") search.set("status", params.status);
+  if (params.page != null) search.set("page", String(params.page));
+  const qs = search.toString();
+  return apiGet<ProposalListResponse>(`/governance/proposals${qs ? `?${qs}` : ""}`);
 }
 
-export function prepareCreateProposal(params: {
-  paramKey: string;
-  currentValue: string;
+export async function getProposal(id: string): Promise<Proposal> {
+  return apiGet<Proposal>(`/governance/proposals/${encodeURIComponent(id)}`);
+}
+
+export async function getGovernanceConfig(): Promise<GovernanceConfig> {
+  return apiGet<GovernanceConfig>("/governance/config");
+}
+
+export async function prepareProposal(input: {
+  parameterKey: string;
   proposedValue: string;
-}): Promise<string> {
-  return apiFetch<UnsignedTxResponse>("/governance/proposals/prepare", {
-    method: "POST",
-    body: JSON.stringify(params),
-  }).then((res) => res.xdr);
+}): Promise<PrepareResponse> {
+  return apiPost<PrepareResponse>("/governance/proposals/prepare", input);
 }
 
-export function submitCreateProposal(signedXdr: string): Promise<string> {
-  return apiFetch<TxHashResponse>("/governance/proposals/submit", {
-    method: "POST",
-    body: JSON.stringify({ signedXdr }),
-  }).then((res) => res.txHash);
+export async function submitProposal(signedXdr: string): Promise<SubmitResponse> {
+  return apiPost<SubmitResponse>("/governance/proposals/submit", { signedXdr });
 }
 
-export function prepareVote(proposalId: number, support: boolean): Promise<string> {
-  return apiFetch<UnsignedTxResponse>(`/governance/proposals/${proposalId}/vote/prepare`, {
-    method: "POST",
-    body: JSON.stringify({ support }),
-  }).then((res) => res.xdr);
+export async function prepareVote(id: string, support: boolean): Promise<PrepareResponse> {
+  return apiPost<PrepareResponse>(
+    `/governance/proposals/${encodeURIComponent(id)}/vote/prepare`,
+    { support },
+  );
 }
 
-export function submitVote(proposalId: number, signedXdr: string): Promise<string> {
-  return apiFetch<TxHashResponse>(`/governance/proposals/${proposalId}/vote/submit`, {
-    method: "POST",
-    body: JSON.stringify({ signedXdr }),
-  }).then((res) => res.txHash);
+export async function submitVote(id: string, signedXdr: string): Promise<SubmitResponse> {
+  return apiPost<SubmitResponse>(
+    `/governance/proposals/${encodeURIComponent(id)}/vote/submit`,
+    { signedXdr },
+  );
 }
 
-export function finalizeProposal(proposalId: number): Promise<string> {
-  return apiFetch<TxHashResponse>(`/governance/proposals/${proposalId}/finalize`, {
-    method: "POST",
-  }).then((res) => res.txHash);
+export async function finalizeProposal(id: string): Promise<SubmitResponse> {
+  return apiPost<SubmitResponse>(
+    `/governance/proposals/${encodeURIComponent(id)}/finalize`,
+    {},
+  );
 }
 
-export function executeProposal(proposalId: number): Promise<string> {
-  return apiFetch<TxHashResponse>(`/governance/proposals/${proposalId}/execute`, {
-    method: "POST",
-  }).then((res) => res.txHash);
+export async function executeProposal(id: string): Promise<SubmitResponse> {
+  return apiPost<SubmitResponse>(
+    `/governance/proposals/${encodeURIComponent(id)}/execute`,
+    {},
+  );
+}
+
+export function explorerTxUrl(txHash: string): string {
+  return `https://stellar.expert/explorer/public/tx/${txHash}`;
 }

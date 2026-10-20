@@ -110,6 +110,28 @@ export const preScreenSchema = z.object({
   depositPercentage: z.number().min(0, "Deposit percentage must be at least 0").max(100, "Deposit percentage cannot exceed 100"),
 });
 
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export const quotaLookupSchema = z.object({
+  userId: z.string().trim().min(1, "User ID is required"),
+  endpoint: z.string().trim().optional(),
+});
+
+export const quotaOverrideSchema = z.object({
+  endpoint: z.string().trim().optional(),
+  elevatedLimit: z
+    .number({ invalid_type_error: "Limit must be a number" })
+    .int("Limit must be a whole number")
+    .min(1, "Limit must be at least 1"),
+  reason: z.string().trim().min(3, "Give a reason of at least 3 characters"),
+  expiresAt: z
+    .string()
+    .optional()
+    .refine((v) => !v || new Date(v).getTime() > Date.now(), {
+      message: "Expiry must be in the future",
+    }),
+});
+
 // ── Type exports ──────────────────────────────────────────────────────────────
 
 export type LoginFormValues = z.infer<typeof loginSchema>;
@@ -121,3 +143,5 @@ export type DepositFormValues = z.infer<typeof depositSchema>;
 export type WhistleblowerFormValues = z.infer<typeof whistleblowerSchema>;
 export type ContactFormValues = z.infer<typeof contactSchema>;
 export type PreScreenFormValues = z.infer<typeof preScreenSchema>;
+export type QuotaLookupFormValues = z.infer<typeof quotaLookupSchema>;
+export type QuotaOverrideFormValues = z.infer<typeof quotaOverrideSchema>;

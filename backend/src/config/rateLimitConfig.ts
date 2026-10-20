@@ -28,6 +28,12 @@ export const rateLimitProfiles = {
     keyPrefix: 'rl:public_search',
     keyBy: 'ip',
   },
+  partnerApplication: {
+    points: 5,
+    duration: 60 * 60, // 1 hour
+    keyPrefix: 'rl:partner_application',
+    keyBy: 'ip',
+  },
   authenticated: {
     points: 300,
     duration: 60, // 1 minute

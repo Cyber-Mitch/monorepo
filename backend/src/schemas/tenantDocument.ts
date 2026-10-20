@@ -17,6 +17,7 @@ export const uploadBodySchema = z.object({
 export const listQuerySchema = z.object({
   category: categorySchema.optional(),
   dealId: z.string().optional(),
+  search: z.string().trim().min(1).max(100).optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 })

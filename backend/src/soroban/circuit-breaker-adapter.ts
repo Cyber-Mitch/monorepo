@@ -7,7 +7,7 @@ import {
 } from './circuit-breaker-errors.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 import { CircuitBreakerConfig } from './circuit-breaker-config.js'
-import { SorobanAdapter, RecordReceiptParams, TenantReputationRecord, OraclePriceReading, DelegationRecord } from './adapter.js'
+import { SorobanAdapter, RecordReceiptParams, TenantReputationRecord, OraclePriceReading } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
 
@@ -282,105 +282,6 @@ export class CircuitBreakerAdapter implements SorobanAdapter {
   // Forwarded explicitly so the delegation routes see the methods through the
   // circuit-breaker wrapper; without these the wrapper hides them and the
   // routes report the feature as unavailable.
-
-  async delegateStake?(delegator: string, delegatee: string, amount: bigint): Promise<string> {
-    if (!this.wrappedAdapter.delegateStake) {
-      throw new Error('delegateStake not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('delegateStake', () =>
-      this.wrappedAdapter.delegateStake!(delegator, delegatee, amount),
-    )
-  }
-
-  async requestUndelegate?(delegator: string, delegatee: string, amount: bigint): Promise<string> {
-    if (!this.wrappedAdapter.requestUndelegate) {
-      throw new Error('requestUndelegate not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('requestUndelegate', () =>
-      this.wrappedAdapter.requestUndelegate!(delegator, delegatee, amount),
-    )
-  }
-
-  async completeUndelegate?(delegator: string, delegatee: string): Promise<string> {
-    if (!this.wrappedAdapter.completeUndelegate) {
-      throw new Error('completeUndelegate not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('completeUndelegate', () =>
-      this.wrappedAdapter.completeUndelegate!(delegator, delegatee),
-    )
-  }
-
-  async claimDelegateeRewards?(delegatee: string): Promise<string> {
-    if (!this.wrappedAdapter.claimDelegateeRewards) {
-      throw new Error('claimDelegateeRewards not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('claimDelegateeRewards', () =>
-      this.wrappedAdapter.claimDelegateeRewards!(delegatee),
-    )
-  }
-
-  async setDelegateeCommission?(delegatee: string, rateBps: number): Promise<string> {
-    if (!this.wrappedAdapter.setDelegateeCommission) {
-      throw new Error('setDelegateeCommission not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('setDelegateeCommission', () =>
-      this.wrappedAdapter.setDelegateeCommission!(delegatee, rateBps),
-    )
-  }
-
-  async claimDelegateeCommission?(delegatee: string): Promise<string> {
-    if (!this.wrappedAdapter.claimDelegateeCommission) {
-      throw new Error('claimDelegateeCommission not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('claimDelegateeCommission', () =>
-      this.wrappedAdapter.claimDelegateeCommission!(delegatee),
-    )
-  }
-
-  async getDelegations?(delegator: string): Promise<DelegationRecord[]> {
-    if (!this.wrappedAdapter.getDelegations) {
-      throw new Error('getDelegations not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('getDelegations', () =>
-      this.wrappedAdapter.getDelegations!(delegator),
-    )
-  }
-
-  async getDelegationStakedBalance?(account: string): Promise<bigint> {
-    if (!this.wrappedAdapter.getDelegationStakedBalance) {
-      throw new Error('getDelegationStakedBalance not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('getDelegationStakedBalance', () =>
-      this.wrappedAdapter.getDelegationStakedBalance!(account),
-    )
-  }
-
-  async getDelegationEpoch?(): Promise<number> {
-    if (!this.wrappedAdapter.getDelegationEpoch) {
-      throw new Error('getDelegationEpoch not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('getDelegationEpoch', () =>
-      this.wrappedAdapter.getDelegationEpoch!(),
-    )
-  }
-
-  async getDelegateeClaimable?(delegatee: string): Promise<bigint> {
-    if (!this.wrappedAdapter.getDelegateeClaimable) {
-      throw new Error('getDelegateeClaimable not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('getDelegateeClaimable', () =>
-      this.wrappedAdapter.getDelegateeClaimable!(delegatee),
-    )
-  }
-
-  async getDelegateeCommissionClaimable?(delegatee: string): Promise<bigint> {
-    if (!this.wrappedAdapter.getDelegateeCommissionClaimable) {
-      throw new Error('getDelegateeCommissionClaimable not supported by wrapped adapter')
-    }
-    return this.executeWithCircuitBreaker('getDelegateeCommissionClaimable', () =>
-      this.wrappedAdapter.getDelegateeCommissionClaimable!(delegatee),
-    )
-  }
 
   async getOraclePrice?(pair: string): Promise<OraclePriceReading> {
     if (!this.wrappedAdapter.getOraclePrice) {

@@ -62,6 +62,7 @@ const useRiskStore = create<RiskState>()(
         name: "shelterflex-risk-storage",
         storage: createJSONStorage(() => localStorage),
         version: 1,
+        skipHydration: true,
       }
     ),
     "RiskStore"

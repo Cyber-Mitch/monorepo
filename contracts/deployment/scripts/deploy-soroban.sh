@@ -94,17 +94,8 @@ CONTRACTS=(
   deal_escrow
   contract_access
   timelock
-  vesting_schedule
-  schema_registry
-  allowlist_registry
   bond_collateral
-  reentrancy_guard
-  epoch_rewards
   slashing_module
-  stake_delegation
-  oracle_price_feeds
-  tenant_reputation
-  rent_to_own
 )
 
 # ── Deployed-state file ─────────────────────────────────────────────────────

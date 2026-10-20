@@ -93,3 +93,65 @@ describe('ErasureService Cascade', () => {
     expect(queries).not.toContain('COMMIT')
   })
 })
+
+describe('ErasureService request lifecycle (Postgres store)', () => {
+  const pendingRow = {
+    id: 'req-1',
+    user_id: 'user-123',
+    status: 'pending',
+    requested_at: new Date().toISOString(),
+    confirm_by: new Date(Date.now() + 86400000).toISOString(),
+    confirmed_at: null,
+    confirmed_by: null,
+  }
+
+  function mockPool(impl: (sql: string, params?: unknown[]) => unknown) {
+    const query = vi.fn().mockImplementation(async (sql: string, params?: unknown[]) => impl(sql, params))
+    vi.spyOn(dbModule, 'getPool').mockResolvedValue({ query } as any)
+    return query
+  }
+
+  it('maps a unique violation on insert to ERASURE_ALREADY_PENDING', async () => {
+    mockPool((sql) => {
+      if (sql.includes('SELECT id FROM erasure_requests')) return { rows: [] }
+      if (sql.includes('INSERT INTO erasure_requests')) {
+        throw Object.assign(new Error('duplicate key'), { code: '23505' })
+      }
+      return { rows: [] }
+    })
+
+    await expect(erasureService.requestErasure('user-123')).rejects.toThrow('ERASURE_ALREADY_PENDING')
+  })
+
+  it('cancels only pending requests', async () => {
+    const query = mockPool((sql) =>
+      sql.includes("SET status = 'cancelled'") ? { rows: [{ ...pendingRow, status: 'cancelled' }] } : { rows: [] },
+    )
+
+    const cancelled = await erasureService.cancelErasure('req-1')
+    expect(cancelled?.status).toBe('cancelled')
+    const sql = query.mock.calls[0][0] as string
+    expect(sql).toContain("WHERE id = $1 AND status = 'pending'")
+  })
+
+  it('returns null when there is nothing pending to cancel', async () => {
+    mockPool(() => ({ rows: [] }))
+    expect(await erasureService.cancelErasure('req-1')).toBeNull()
+  })
+
+  it('lists requests filtered by status with a total', async () => {
+    const query = mockPool((sql) =>
+      sql.includes('COUNT(*)') ? { rows: [{ total: 1 }] } : { rows: [pendingRow] },
+    )
+
+    const result = await erasureService.list({ status: 'pending', limit: 10, offset: 0 })
+    expect(result.total).toBe(1)
+    expect(result.requests[0]).toMatchObject({ id: 'req-1', userId: 'user-123', status: 'pending' })
+    expect(query.mock.calls[0][1]).toEqual(['pending', 10, 0])
+  })
+
+  it('returns the expired count from expireOverdueRequests', async () => {
+    mockPool(() => ({ rows: [{ id: 'req-1', user_id: 'user-123' }], rowCount: 1 }))
+    expect(await erasureService.expireOverdueRequests(new Date())).toBe(1)
+  })
+})

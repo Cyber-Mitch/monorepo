@@ -1,41 +1,47 @@
 import { apiGet } from "./apiClient";
 
-export type ScoreBand = "Poor" | "Fair" | "Good" | "Excellent";
+export type CreditScoreBand = "poor" | "fair" | "good" | "excellent";
 
-export type ScoreFactorStatus = "pass" | "fail" | "warn";
-
-export interface ScoreFactor {
+export interface CreditScoreFactor {
   name: string;
-  status: ScoreFactorStatus;
+  status: "pass" | "fail" | "warn";
   weight: number;
   detail: string;
 }
 
-export interface CreditScoreSnapshot {
-  score: number;
-  band: ScoreBand;
-  factors: ScoreFactor[];
-  computedAt: string;
-  tips: string[];
+export interface CreditScoreResponse {
+  success: boolean;
+  data: {
+    score: number;
+    band: CreditScoreBand;
+    factors: CreditScoreFactor[];
+    computedAt: string;
+    tips: string[];
+  } | null;
 }
 
-export interface ScoreHistoryPoint {
-  month: string;
+export interface CreditScoreHistoryItem {
+  id: string;
+  userId: string;
   score: number;
+  band: CreditScoreBand;
+  factors: CreditScoreFactor[];
+  computedAt: string;
 }
 
 export interface CreditScoreHistoryResponse {
-  history: {
-    score: number;
-    band: ScoreBand;
-    computedAt: string;
-  }[];
+  success: boolean;
+  data: CreditScoreHistoryItem[];
 }
 
-export async function getMyCreditScore(): Promise<CreditScoreSnapshot> {
-  return apiGet<CreditScoreSnapshot>("/tenant/credit-score/my");
+export async function getCreditScore(): Promise<CreditScoreResponse> {
+  return apiGet<CreditScoreResponse>("/api/v1/tenant/credit-score");
 }
 
-export async function getMyCreditScoreHistory(): Promise<CreditScoreHistoryResponse> {
-  return apiGet<CreditScoreHistoryResponse>("/tenant/credit-score/my/history");
+export async function getCreditScoreHistory(
+  limit = 10,
+): Promise<CreditScoreHistoryResponse> {
+  return apiGet<CreditScoreHistoryResponse>(
+    `/api/v1/tenant/credit-score/history?limit=${limit}`,
+  );
 }

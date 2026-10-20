@@ -219,7 +219,7 @@ function WalletPageContent() {
 
   const [reloadNonce, setReloadNonce] = useState(0);
 
-  const { isFrozen, freezeReason } = useRiskState();
+  const { hasHydrated: riskStateHydrated, isFrozen, freezeReason } = useRiskState();
   const [isExporting, setIsExporting] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -500,8 +500,8 @@ function WalletPageContent() {
               Top up
             </Button>
             <Button
-              disabled={isFrozen}
-              title={isFrozen ? "Account frozen. Please top up wallet." : ""}
+              disabled={!riskStateHydrated || isFrozen}
+              title={isFrozen ? "Account frozen. Please top up wallet." : !riskStateHydrated ? "Loading account risk state." : ""}
               variant="outline"
               className="w-full border-3 border-foreground bg-background font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] sm:w-auto"
               onClick={() => setWithdrawalModalOpen(true)}
@@ -512,7 +512,7 @@ function WalletPageContent() {
           </div>
         </div>
 
-        {isFrozen && (
+        {riskStateHydrated && isFrozen && (
           <div className="mb-6">
             <FrozenAccountBanner
               deficit={deficit}

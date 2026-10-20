@@ -109,11 +109,6 @@ deploy_or_skip "whistleblower_rewards" "deploy_whistleblower_rewards.sh" "WHISTL
 # ── Step 6: staking_pool ─────────────────────────────────────────────────────
 deploy_or_skip "staking_pool" "deploy_staking_pool.sh" "STAKING_POOL_ID"
 
-# ── Step 7: oracle_price_feeds ────────────────────────────────────────────────
-deploy_or_skip "oracle_price_feeds" "deploy_oracle_price_feeds.sh" "ORACLE_PRICE_FEEDS_ID"
-
-# ── Step 8: tenant_reputation ────────────────────────────────────────────────
-deploy_or_skip "tenant_reputation" "deploy_tenant_reputation.sh" "TENANT_REPUTATION_ID"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

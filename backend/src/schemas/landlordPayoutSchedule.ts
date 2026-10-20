@@ -45,21 +45,30 @@ export const deductionSchema = z.object({
 })
 
 export const listPayoutScheduleSchema = z.object({
-  propertyId: z.string().optional(),
+  propertyId: z.string().min(1).max(128).optional(),
   status: payoutStatusSchema.optional(),
   channel: payoutChannelSchema.optional(),
   grouping: payoutGroupingSchema.optional().default('monthly'),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
-  page: z
-    .string()
-    .optional()
-    .transform((v) => (v ? parseInt(v, 10) : 1)),
-  pageSize: z
-    .string()
-    .optional()
-    .transform((v) => Math.min(100, v ? parseInt(v, 10) : 20)),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).optional().default(20),
 })
+
+export const payoutScheduleIdParamsSchema = z.object({
+  payoutId: z.string().min(1).max(128),
+})
+
+export const payoutSchedulePreferenceSchema = z.enum(['activation', 'weekly', 'monthly'])
+
+export const updatePayoutSchedulePreferenceSchema = z.object({
+  schedulePreference: payoutSchedulePreferenceSchema,
+})
+
+export type PayoutSchedulePreference = z.infer<typeof payoutSchedulePreferenceSchema>
+export type UpdatePayoutSchedulePreferenceRequest = z.infer<
+  typeof updatePayoutSchedulePreferenceSchema
+>
 
 export type PayoutStatus = z.infer<typeof payoutStatusSchema>
 export type PayoutChannel = z.infer<typeof payoutChannelSchema>

@@ -1,305 +1,373 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+/**
+ * Side-by-side property comparison (#1916).
+ *
+ * The selection lives in the `ids` query string, so a comparison can be shared
+ * and survives reloads. It is also mirrored to session storage, so returning to
+ * the page without ids restores the last selection. Removing a property updates
+ * both. Amenity rows where listings disagree are highlighted.
+ */
+
+import { Suspense, useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, X, Scale } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Bath, Bed, Home, MapPin, Scale, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { getProperty, type PropertyListing } from "@/lib/propertiesApi";
-import {
-  parseCompareIds,
-  encodeCompareIds,
-  MAX_COMPARE,
-  MIN_COMPARE,
-  canCompare,
-  buildAmenityDiff,
-  type AmenityRow,
-} from "@/lib/compare";
+import { EmptyState, ErrorState, LoadingState, MoneyValue } from "@/components/ui/data-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { listPublicListings, type PropertyListing } from "@/lib/propertiesApi";
 import { formatNgn } from "@/lib/currency";
 import { PROPERTY_AMENITY_LABELS, type PropertyAmenity } from "@/lib/amenities";
-import { LandlordVerificationBadge } from "@/components/LandlordVerificationBadge";
-import { ShieldCheck } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  MAX_COMPARE,
+  MIN_COMPARE,
+  buildAmenityDiff,
+  encodeCompareIds,
+  loadCompareIds,
+  parseCompareIds,
+  removeFromCompare,
+  saveCompareIds,
+} from "@/lib/compare";
 
-interface PropertyWithAmenities extends PropertyListing {
-  amenities: PropertyAmenity[];
+/** Listing payloads carry the annual rent; the instalment is spread over this many months. */
+const PLAN_MONTHS = 12;
+
+type Fetched = {
+  key: string;
+  reload: number;
+  listings?: PropertyListing[];
+  error?: string;
+};
+
+function formatLocation(listing: PropertyListing) {
+  const parts = [listing.area, listing.city].filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : "Nigeria";
+}
+
+function amenityLabel(amenity: string) {
+  return PROPERTY_AMENITY_LABELS[amenity as PropertyAmenity] ?? amenity;
 }
 
 function CompareContent() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-  const [properties, setProperties] = useState<PropertyWithAmenities[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
 
   const ids = parseCompareIds(searchParams.get("ids"));
+  const key = ids.join(",");
+  const [reload, setReload] = useState(0);
+  const [fetched, setFetched] = useState<Fetched | null>(null);
+
+  // Restore the last selection from this session when the page opens without one.
+  // Runs on mount only: once the user has removed everything, it must not bring the old set back.
+  useEffect(() => {
+    if (ids.length > 0) return;
+    const stored = loadCompareIds();
+    if (stored.length > 0) {
+      router.replace(`/properties/compare?ids=${encodeCompareIds(stored)}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the session copy in step with the URL, so the selection can be restored later.
+  useEffect(() => {
+    if (key) saveCompareIds(key.split(","));
+  }, [key]);
 
   useEffect(() => {
-    if (ids.length === 0) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchProperties = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const results = await Promise.all(
-          ids.map((id) => getProperty(id).catch((err) => null))
-        );
-        const validProperties = results
-          .filter((r): r is NonNullable<typeof r> => r !== null && r.data !== undefined)
-          .map((r) => ({
-            ...r.data,
-            amenities: (r.data as any).amenities || [],
-          }));
-        setProperties(validProperties);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load properties");
-      } finally {
-        setLoading(false);
-      }
+    if (!key) return;
+    let cancelled = false;
+    const requested = key.split(",");
+    listPublicListings({ listingIds: requested, pageSize: requested.length })
+      .then((res) => {
+        if (cancelled) return;
+        const byId = new Map(res.data.map((listing) => [listing.listingId, listing]));
+        const listings = requested
+          .map((id) => byId.get(id))
+          .filter((listing): listing is PropertyListing => listing !== undefined);
+        setFetched({ key, reload, listings });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setFetched({
+            key,
+            reload,
+            error: err instanceof Error ? err.message : "Could not load these properties.",
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
     };
+  }, [key, reload]);
 
-    void fetchProperties();
-  }, [ids]);
+  const removeListing = (listingId: string) => {
+    const next = removeFromCompare(ids, listingId);
+    saveCompareIds(next);
+    router.replace(next.length > 0 ? `/properties/compare?ids=${encodeCompareIds(next)}` : "/properties/compare");
+  };
 
-  const handleRemove = useCallback(
-    (id: string) => {
-      const newIds = ids.filter((i) => i !== id);
-      const newParams = new URLSearchParams(searchParams.toString());
-      if (newIds.length > 0) {
-        newParams.set("ids", encodeCompareIds(newIds));
-      } else {
-        newParams.delete("ids");
-      }
-      router.push(`/properties/compare?${newParams.toString()}`);
-    },
-    [ids, searchParams, router]
-  );
+  const retry = () => setReload((n) => n + 1);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="font-mono font-bold text-muted-foreground">Loading comparison...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <p className="font-mono font-bold text-destructive mb-4">{error}</p>
-          <Link href="/properties">
-            <Button variant="outline">Back to Properties</Button>
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (ids.length < MIN_COMPARE) {
-    return (
-      <div className="min-h-screen bg-background">
-        <main id="main-content" className="container mx-auto max-w-4xl px-4 pt-24 pb-12">
-          <Link
-            href="/properties"
-            className="inline-flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-6"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Properties
-          </Link>
-          <div className="border-3 border-foreground bg-muted p-12 text-center shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
-            <Scale className="mx-auto h-16 w-16 text-muted-foreground mb-4" />
-            <h1 className="font-mono text-2xl font-black mb-2">Compare Properties</h1>
-            <p className="text-muted-foreground mb-6">
-              Select at least {MIN_COMPARE} properties to compare side-by-side.
-            </p>
-            <Link href="/properties">
-              <Button className="border-3 border-foreground bg-primary font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]">
-                Browse Properties
-              </Button>
-            </Link>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  const amenityRows = buildAmenityDiff(properties);
+  const underMinimum = ids.length < MIN_COMPARE;
+  const current = fetched && fetched.key === key && fetched.reload === reload ? fetched : null;
+  const listings = current?.listings;
+  const error = current?.error;
 
   return (
-    <div className="min-h-screen bg-background">
-      <main id="main-content" className="container mx-auto max-w-7xl px-4 pt-24 pb-12">
-        <div className="mb-6 flex items-center justify-between">
-          <Link
-            href="/properties"
-            className="inline-flex items-center text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Properties
-          </Link>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              {properties.length} of {MAX_COMPARE} properties
-            </span>
+    <main className="min-h-screen bg-background">
+      <section className="container mx-auto px-4 py-12">
+        <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-black tracking-tight">Compare properties</h1>
+            <p className="mt-2 text-muted-foreground">
+              Compare {MIN_COMPARE} to {MAX_COMPARE} homes side by side.
+            </p>
           </div>
-        </div>
+          <Button asChild variant="outline" className="border-2 border-foreground font-bold">
+            <Link href="/properties">Back to search</Link>
+          </Button>
+        </header>
 
-        <h1 className="mb-6 font-mono text-3xl font-black">Compare Properties</h1>
+        {underMinimum && (
+          <EmptyState
+            icon={Scale}
+            title="Pick at least two properties"
+            description={`You have ${ids.length} selected. Tap the compare icon on at least ${MIN_COMPARE} listings to see them side by side.`}
+            action={{ label: "Browse properties", href: "/properties" }}
+          />
+        )}
 
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-48 font-bold">Attribute</TableHead>
-                {properties.map((property) => (
-                  <TableHead key={property.listingId} className="min-w-64">
-                    <div className="space-y-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemove(property.listingId)}
-                        className="float-right"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                      <Link
-                        href={`/properties/${property.listingId}`}
-                        className="font-mono font-bold hover:underline block"
-                      >
-                        {property.address}
-                      </Link>
-                      <p className="text-sm text-muted-foreground">
-                        {[property.area, property.city].filter(Boolean).join(", ")}
-                      </p>
-                    </div>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {/* Price */}
-              <TableRow>
-                <TableCell className="font-bold">Annual Rent</TableCell>
-                {properties.map((property) => (
-                  <TableCell key={property.listingId}>
-                    <span className="font-mono font-black text-lg">
-                      {formatNgn(property.annualRentNgn)}
-                    </span>
-                  </TableCell>
-                ))}
-              </TableRow>
+        {!underMinimum && !listings && !error && (
+          <LoadingState label="Loading comparison" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {ids.map((id) => (
+              <Skeleton key={id} className="h-80 w-full" />
+            ))}
+          </LoadingState>
+        )}
 
-              {/* Monthly Payment */}
-              <TableRow>
-                <TableCell className="font-bold">Est. Monthly</TableCell>
-                {properties.map((property) => (
-                  <TableCell key={property.listingId}>
-                    <span className="font-mono font-bold">
-                      {formatNgn(Math.round(property.annualRentNgn / 12))}/mo
-                    </span>
-                  </TableCell>
-                ))}
-              </TableRow>
+        {!underMinimum && error && (
+          <ErrorState title="The comparison is unavailable" description={error} onRetry={retry} />
+        )}
 
-              {/* Bedrooms */}
-              <TableRow>
-                <TableCell className="font-bold">Bedrooms</TableCell>
-                {properties.map((property) => (
-                  <TableCell key={property.listingId}>{property.bedrooms}</TableCell>
-                ))}
-              </TableRow>
+        {!underMinimum && listings && listings.length < MIN_COMPARE && (
+          <EmptyState
+            icon={Home}
+            title="Not enough of these listings are available"
+            description="Some of the selected properties could not be found. Remove them or pick others from search."
+            action={{ label: "Browse properties", href: "/properties" }}
+          />
+        )}
 
-              {/* Bathrooms */}
-              <TableRow>
-                <TableCell className="font-bold">Bathrooms</TableCell>
-                {properties.map((property) => (
-                  <TableCell key={property.listingId}>{property.bathrooms}</TableCell>
-                ))}
-              </TableRow>
+        {!underMinimum && listings && listings.length >= MIN_COMPARE && (
+          <ComparisonTable listings={listings} onRemove={removeListing} />
+        )}
+      </section>
+    </main>
+  );
+}
 
-              {/* Location */}
-              <TableRow>
-                <TableCell className="font-bold">Location</TableCell>
-                {properties.map((property) => (
-                  <TableCell key={property.listingId}>
-                    {[property.area, property.city].filter(Boolean).join(", ") || "Nigeria"}
-                  </TableCell>
-                ))}
-              </TableRow>
+function ComparisonTable({
+  listings,
+  onRemove,
+}: {
+  listings: PropertyListing[];
+  onRemove: (listingId: string) => void;
+}) {
+  const amenityRows = buildAmenityDiff(listings.map((l) => ({ amenities: l.amenities ?? [] })));
+  const cellClass = "border-t-2 border-foreground/20 p-3 align-top";
+  const headClass = "border-t-2 border-foreground/20 p-3 text-left align-top text-sm font-medium text-muted-foreground";
 
-              {/* Verification Status */}
-              <TableRow>
-                <TableCell className="font-bold">Verification</TableCell>
-                {properties.map((property) => (
-                  <TableCell key={property.listingId}>
-                    <div className="flex flex-wrap gap-2">
-                      {property.hasApprovedInspection && (
-                        <div className="flex items-center gap-1 text-sm">
-                          <ShieldCheck className="h-4 w-4" />
-                          <span>Inspection Verified</span>
-                        </div>
-                      )}
-                      <LandlordVerificationBadge
-                        level={(property as any).landlordVerificationLevel || "unverified"}
-                        size="sm"
+  return (
+    <div className="overflow-x-auto border-3 border-foreground bg-card">
+      <table className="w-full min-w-160 border-collapse">
+        <caption className="sr-only">
+          Comparison of {listings.length} properties on price, instalments, location, bedrooms, verification and amenities
+        </caption>
+        <thead>
+          <tr>
+            <td className="w-40 p-3" />
+            {listings.map((listing) => (
+              <th key={listing.listingId} scope="col" className="p-3 text-left align-top">
+                <div className="space-y-2">
+                  <div className="relative aspect-4/3 w-full overflow-hidden border-2 border-foreground bg-muted">
+                    {listing.photos?.[0] ? (
+                      <Image
+                        src={listing.photos[0]}
+                        alt={`Photo of ${listing.address}`}
+                        fill
+                        sizes="(max-width: 768px) 80vw, 33vw"
+                        className="object-cover"
                       />
-                    </div>
-                  </TableCell>
-                ))}
-              </TableRow>
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                        <Home className="h-10 w-10" aria-hidden="true" />
+                        <span className="sr-only">No photo available</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="font-mono text-base font-bold leading-tight">{listing.address}</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onRemove(listing.listingId)}
+                    aria-label={`Remove ${listing.address} from comparison`}
+                    className="-ml-2 gap-1"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                    Remove
+                  </Button>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
 
-              {/* Amenities */}
-              {amenityRows.map((row) => (
-                <TableRow
-                  key={row.amenity}
-                  className={cn(row.differs && "bg-primary/5")}
-                >
-                  <TableCell className="font-bold">
-                    {PROPERTY_AMENITY_LABELS[row.amenity as PropertyAmenity] || row.amenity}
-                  </TableCell>
-                  {row.availability.map((available, idx) => (
-                    <TableCell key={properties[idx].listingId}>
-                      {available ? (
-                        <span className="text-green-600 font-bold">✓</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
+        <tbody>
+          <tr>
+            <th scope="row" className={headClass}>Price</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                <p className="font-mono text-lg font-black">
+                  <MoneyValue
+                    status="ready"
+                    amount={l.outrightPriceNgn ?? l.installmentBasePriceNgn}
+                    format={formatNgn}
+                    unavailableLabel="Price unavailable"
+                  />
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {l.outrightPriceNgn ? "Outright" : "Installment base"}
+                </p>
+              </td>
+            ))}
+          </tr>
+
+          <tr>
+            <th scope="row" className={headClass}>Annual rent</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                <MoneyValue status="ready" amount={l.annualRentNgn} format={formatNgn} unavailableLabel="Rent unavailable" />
+              </td>
+            ))}
+          </tr>
+
+          <tr>
+            <th scope="row" className={headClass}>Monthly instalment</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                <MoneyValue
+                  status="ready"
+                  amount={
+                    l.installmentBasePriceNgn !== undefined
+                      ? Math.round(l.installmentBasePriceNgn / PLAN_MONTHS)
+                      : undefined
+                  }
+                  format={formatNgn}
+                  unavailableLabel="Not offered on instalments"
+                />
+                <span className="text-xs text-muted-foreground"> / month, {PLAN_MONTHS}-month plan</span>
+              </td>
+            ))}
+          </tr>
+
+          <tr>
+            <th scope="row" className={headClass}>Deposit</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                <span className="text-muted-foreground">Not listed</span>
+              </td>
+            ))}
+          </tr>
+
+          <tr>
+            <th scope="row" className={headClass}>Location</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                <span className="flex items-center gap-1">
+                  <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {formatLocation(l)}
+                </span>
+              </td>
+            ))}
+          </tr>
+
+          <tr>
+            <th scope="row" className={headClass}>Bedrooms and bathrooms</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                <span className="flex items-center gap-3">
+                  <span className="flex items-center gap-1">
+                    <Bed className="h-4 w-4" aria-hidden="true" />
+                    {l.bedrooms} bed
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Bath className="h-4 w-4" aria-hidden="true" />
+                    {l.bathrooms} bath
+                  </span>
+                </span>
+              </td>
+            ))}
+          </tr>
+
+          <tr>
+            <th scope="row" className={headClass}>Verification</th>
+            {listings.map((l) => (
+              <td key={l.listingId} className={cellClass}>
+                {l.hasApprovedInspection ? (
+                  <span className="flex items-center gap-1 font-medium">
+                    <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                    Verified inspection
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">No approved inspection</span>
+                )}
+              </td>
+            ))}
+          </tr>
+
+          {amenityRows.length === 0 && (
+            <tr>
+              <th scope="row" className={headClass}>Amenities</th>
+              <td className={cellClass} colSpan={listings.length}>
+                <span className="text-muted-foreground">No amenities listed for these properties.</span>
+              </td>
+            </tr>
+          )}
+
+          {amenityRows.map((row) => (
+            <tr key={row.amenity} data-differs={row.differs || undefined} className={row.differs ? "bg-primary/10" : undefined}>
+              <th scope="row" className={headClass}>
+                {amenityLabel(row.amenity)}
+                {row.differs && <span className="sr-only"> (differs between properties)</span>}
+              </th>
+              {row.availability.map((has, index) => (
+                <td key={listings[index].listingId} className={cellClass}>
+                  {has ? (
+                    <span className="font-bold">Included</span>
+                  ) : (
+                    <span className="text-muted-foreground">Not included</span>
+                  )}
+                </td>
               ))}
-            </TableBody>
-          </Table>
-        </div>
-
-        <div className="mt-6 flex justify-center gap-4">
-          <Link href="/properties">
-            <Button variant="outline">Add More Properties</Button>
-          </Link>
-        </div>
-      </main>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-export default function ComparePage() {
+export default function CompareClient() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="font-mono font-bold text-muted-foreground">Loading comparison...</p>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-background flex items-center justify-center">
+          <p className="font-mono font-bold text-muted-foreground">Loading comparison...</p>
+        </main>
+      }
+    >
       <CompareContent />
     </Suspense>
   );

@@ -61,45 +61,6 @@ interface SuspensionDialogState {
   reason: string;
 }
 
-const mockUsers: User[] = [
-  {
-    id: "u1",
-    name: "Alice Johnson",
-    email: "alice@example.com",
-    role: "tenant",
-    status: "active",
-    joinedDate: "2024-01-15",
-    lastActive: "2024-04-28",
-  },
-  {
-    id: "u2",
-    name: "Bob Smith",
-    email: "bob@example.com",
-    role: "landlord",
-    status: "active",
-    joinedDate: "2023-12-20",
-    lastActive: "2024-04-27",
-  },
-  {
-    id: "u4",
-    name: "David Brown",
-    email: "david@example.com",
-    role: "tenant",
-    status: "suspended",
-    joinedDate: "2024-01-01",
-    lastActive: "2024-04-20",
-  },
-  {
-    id: "u5",
-    name: "Eve Davis",
-    email: "eve@example.com",
-    role: "landlord",
-    status: "active",
-    joinedDate: "2024-03-05",
-    lastActive: "2024-04-26",
-  },
-];
-
 const ROLES: { value: UserRole; label: string }[] = [
   { value: "tenant", label: "Tenant" },
   { value: "landlord", label: "Landlord" },
@@ -114,7 +75,7 @@ const STATUSES: { value: UserStatus; label: string; icon: React.ElementType }[] 
   ];
 
 export default function AdminUsersPage() {
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [users, setUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<UserRole | "all">("all");
   const [statusFilter, setStatusFilter] = useState<UserStatus | "all">("all");
@@ -219,6 +180,9 @@ export default function AdminUsersPage() {
           <h1 className="font-mono text-4xl font-black mb-2">User Management</h1>
           <p className="text-muted-foreground">
             Manage user accounts, roles, and permissions
+          </p>
+          <p className="mt-4 border-2 border-destructive bg-card p-4 text-sm" role="status">
+            User management is unavailable. The backend does not provide a user-listing or account-suspension endpoint. Role grant and revoke endpoints exist, but this page cannot apply them without a user list. No changes can be made here.
           </p>
         </div>
 
@@ -409,7 +373,7 @@ export default function AdminUsersPage() {
 
           {paginatedUsers.length === 0 && (
             <div className="p-8 text-center text-muted-foreground" role="status">
-              No users found
+              User data is unavailable until the backend provides a user-listing endpoint.
             </div>
           )}
           <div aria-live="polite" aria-atomic="true" className="sr-only">

@@ -8,6 +8,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   CopyObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'node:crypto'
@@ -28,6 +29,13 @@ export interface StorageProvider {
   generatePresignedUpload(key: string, contentType: string, ttlSeconds: number): Promise<{ uploadUrl: string; objectKey: string }>
   generatePresignedDownload(key: string, ttlSeconds: number): Promise<{ downloadUrl: string }>
   copyFile(sourceKey: string, destKey: string): Promise<void>
+  /** Returns object metadata, or null when the object does not exist. */
+  headFile(key: string): Promise<StoredObjectMetadata | null>
+}
+
+export interface StoredObjectMetadata {
+  size: number
+  contentType?: string
 }
 
 // S3 Storage Provider
@@ -111,6 +119,26 @@ class S3StorageProvider implements StorageProvider {
     })
     await this.client.send(command)
   }
+
+  async headFile(key: string): Promise<StoredObjectMetadata | null> {
+    const command = new HeadObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    })
+    try {
+      const response = await this.client.send(command)
+      return {
+        size: Number(response.ContentLength ?? 0),
+        contentType: response.ContentType ?? undefined,
+      }
+    } catch (error) {
+      const err = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+      if (err?.name === 'NotFound' || err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
+        return null
+      }
+      throw error
+    }
+  }
 }
 
 // Local Storage Provider (for development)
@@ -166,6 +194,17 @@ class LocalStorageProvider implements StorageProvider {
     const dir = join(destPath, '..')
     await fs.mkdir(dir, { recursive: true })
     await fs.copyFile(sourcePath, destPath)
+  }
+
+  async headFile(key: string): Promise<StoredObjectMetadata | null> {
+    try {
+      const stat = await fs.stat(this.getFilePath(key))
+      if (!stat.isFile()) return null
+      return { size: stat.size }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null
+      throw error
+    }
   }
 }
 
@@ -223,6 +262,15 @@ export async function copyFile(sourceKey: string, destKey: string): Promise<void
   return provider.copyFile(sourceKey, destKey)
 }
 
+/**
+ * Look up an object's size/content type without downloading it.
+ * Resolves to null when the object does not exist.
+ */
+export async function headFile(key: string): Promise<StoredObjectMetadata | null> {
+  const provider = getStorageProvider()
+  return provider.headFile(key)
+}
+
 export function contentTypeToExtension(contentType: string): string {
   const map: Record<string, string> = {
     'application/pdf': 'pdf',
@@ -272,6 +320,35 @@ export function buildAgreementObjectKey(
   dealId: string,
 ): string {
   return `agreements/${dealId}/agreement.pdf`
+}
+
+/**
+ * Reduce a user-supplied file name to a safe object-key segment: strips any
+ * directory components, replaces characters outside [A-Za-z0-9._-] with "_",
+ * drops leading dots and caps the length at 100 characters.
+ */
+export function sanitizeObjectFileName(fileName: string): string {
+  const base = fileName.split(/[\\/]/).pop() ?? ''
+  const cleaned = base
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[.]+/, '')
+    .slice(0, 100)
+  return cleaned.length > 0 ? cleaned : 'file'
+}
+
+export const MESSAGE_ATTACHMENT_PREFIX = 'messaging'
+
+/** Per-conversation key prefix for message attachments. */
+export function messageAttachmentPrefix(conversationId: string): string {
+  return `${MESSAGE_ATTACHMENT_PREFIX}/${conversationId}/`
+}
+
+export function buildMessageAttachmentObjectKey(
+  conversationId: string,
+  fileName: string,
+): string {
+  return `${messageAttachmentPrefix(conversationId)}${randomUUID()}-${sanitizeObjectFileName(fileName)}`
 }
 
 export async function generatePresignedUpload(

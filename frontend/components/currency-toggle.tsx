@@ -4,7 +4,7 @@ import { useCurrency } from '@/contexts/CurrencyContext'
 import type { DisplayCurrency } from '@/lib/currency'
 
 export function CurrencyToggle() {
-  const { displayCurrency, setDisplayCurrency } = useCurrency()
+  const { displayCurrency, isHydrated, setDisplayCurrency } = useCurrency()
 
   const options: DisplayCurrency[] = ['NGN', 'USDC']
 
@@ -19,12 +19,13 @@ export function CurrencyToggle() {
           key={opt}
           type="button"
           onClick={() => setDisplayCurrency(opt)}
-          className={`px-2.5 py-1 transition-colors ${
-            displayCurrency === opt
+          disabled={!isHydrated}
+          className={`px-2.5 py-1 transition-colors disabled:cursor-not-allowed ${
+            isHydrated && displayCurrency === opt
               ? 'bg-primary text-foreground'
               : 'bg-background text-foreground hover:bg-muted'
           }`}
-          aria-pressed={displayCurrency === opt}
+          aria-pressed={isHydrated && displayCurrency === opt}
         >
           {opt}
         </button>

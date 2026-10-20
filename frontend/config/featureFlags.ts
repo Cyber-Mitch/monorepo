@@ -13,6 +13,7 @@ export const defaultFlags = {
   RENT_TO_OWN_ENABLED: false,
   ADVANCED_WALLET_OPS_ENABLED: false,
   BACKEND_HEALTH_INDICATOR_ENABLED: false,
+  GOVERNANCE_ENABLED: false,
 } as const
 
 export type FlagName = keyof typeof defaultFlags
