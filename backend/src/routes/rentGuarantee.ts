@@ -13,7 +13,7 @@
 import { Router, type Response, type NextFunction } from 'express'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { validate } from '../middleware/validate.js'
-import { idempotency } from '../middleware/idempotency.js'
+import { durableApiIdempotency } from '../middleware/durableApiIdempotency.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { dealStore } from '../models/dealStore.js'
@@ -157,7 +157,7 @@ export function createRentGuaranteeRouter(options: RentGuaranteeRouterOptions = 
   router.post(
     '/rent-guarantee/policies/:id/bind',
     authenticateToken,
-    idempotency(),
+    durableApiIdempotency(),
     validate(policyIdParamSchema, 'params'),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
