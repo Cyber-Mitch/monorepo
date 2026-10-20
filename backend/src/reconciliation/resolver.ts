@@ -22,16 +22,29 @@ function getMaxAttempts(mismatch: Mismatch): number {
 // ── Repair effect (injectable) ────────────────────────────────────────────────
 
 /**
- * Posts the missing credit for a `missing_credit` mismatch. In production this
- * re-queries the PSP (`provider.fetchSettlement()`) and credits the ledger.
- * Injectable so it can be wired to the real poster and asserted in tests.
+ * Posts the missing credit for a `missing_credit` mismatch. The production poster
+ * re-verifies the payment with the PSP and credits the ledger only when the PSP
+ * confirms it (see `missingCreditPoster.ts`). Injectable so tests can assert it.
  */
 export type MissingCreditPoster = (mismatch: Mismatch) => Promise<void>
 
-let postMissingCredit: MissingCreditPoster = async (mismatch) => {
-  // Placeholder until the PSP reconciliation integration lands.
-  logger.info('[resolver] (placeholder) would post missing credit', { id: mismatch.id })
+/**
+ * Thrown by a poster when the mismatch cannot be repaired automatically: the PSP
+ * reports the payment failed or was reversed, the confirmed amount differs from
+ * the deposit, or no deposit matches. The resolver escalates these immediately
+ * rather than retrying.
+ */
+export class NonRetryableResolutionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NonRetryableResolutionError'
+  }
 }
+
+// Unset until startup registers the PSP-backed poster. A missing poster is an
+// error, never a silent success: otherwise the mismatch would auto-resolve with
+// no credit posted.
+let postMissingCredit: MissingCreditPoster | null = null
 
 export function setMissingCreditPoster(fn: MissingCreditPoster): void {
   postMissingCredit = fn
@@ -54,8 +67,10 @@ async function resolveMissingCredit(mismatch: Mismatch): Promise<ResolutionOutco
   // (the resolver re-attempts an open mismatch every pass, and passes can
   // overlap) never post the credit twice. The effect runs at most once per
   // mismatch; a failed effect is not recorded, so transient failures can retry.
+  const poster = postMissingCredit
+  if (!poster) throw new Error('no missing_credit poster registered')
   const key = repairKey(mismatch)
-  await applyIdempotentRepair(key, () => postMissingCredit(mismatch))
+  await applyIdempotentRepair(key, () => poster(mismatch))
   const posted = hasRepairBeenApplied(key)
   logger.info('[resolver] missing_credit repair', { id: mismatch.id, key, posted })
   // Once the credit is confirmed posted the mismatch is genuinely fixed, so it
@@ -146,6 +161,21 @@ export async function runResolutionPass(): Promise<{ resolved: number; escalated
         })
       }
     } catch (err) {
+      if (err instanceof NonRetryableResolutionError) {
+        await updateMismatchStatus(mismatch.id, 'escalated', {
+          escalatedAt: new Date(),
+          resolutionWorkflow: mismatch.mismatchClass,
+          lastResolutionAt: new Date(),
+          resolutionAttempts: mismatch.resolutionAttempts + 1,
+        })
+        logger.warn('[resolver] Mismatch escalated — cannot auto-resolve', {
+          id: mismatch.id,
+          class: mismatch.mismatchClass,
+          reason: err.message,
+        })
+        result.escalated++
+        continue
+      }
       logger.error('[resolver] Resolution handler threw', {
         id: mismatch.id,
         error: err instanceof Error ? err.message : String(err),

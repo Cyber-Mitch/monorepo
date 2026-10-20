@@ -14,7 +14,7 @@ import {
   ALL_CHANNELS,
   type NotificationChannel,
   type NotificationTemplate,
-  InMemoryNotificationPreferenceStore,
+  type NotificationPreferenceStore,
   notificationPreferenceStore,
 } from "../models/notificationPreferenceStore.js";
 
@@ -37,16 +37,19 @@ export function computeBackoffMs(
  * requested channels (or all channels by default), minus any the user has
  * opted out of for this template.
  */
-export function resolveChannels(
+export async function resolveChannels(
   userId: string,
   template: NotificationTemplate,
   requested: NotificationChannel[] | undefined,
-  store: InMemoryNotificationPreferenceStore = notificationPreferenceStore,
-): NotificationChannel[] {
+  store: NotificationPreferenceStore = notificationPreferenceStore,
+): Promise<NotificationChannel[]> {
   const candidates = requested && requested.length > 0 ? requested : ALL_CHANNELS;
   // De-duplicate while preserving order.
   const unique = Array.from(new Set(candidates));
-  return unique.filter((channel) => store.isChannelEnabled(userId, template, channel));
+  const enabled = await Promise.all(
+    unique.map((channel) => store.isChannelEnabled(userId, template, channel)),
+  );
+  return unique.filter((_channel, index) => enabled[index]);
 }
 
 export type ChannelDeliveryStatus = "delivered" | "failed" | "skipped";
@@ -75,7 +78,7 @@ export type ChannelAdapter = (input: {
 
 export interface DispatchOptions {
   channels?: NotificationChannel[];
-  store?: InMemoryNotificationPreferenceStore;
+  store?: NotificationPreferenceStore;
   maxAttempts?: number;
   /** Injectable delay (defaults to a real timer); tests pass a no-op. */
   sleep?: (ms: number) => Promise<void>;
@@ -99,7 +102,7 @@ export async function dispatchNotification(
   const maxAttempts = options.maxAttempts ?? MAX_DELIVERY_ATTEMPTS;
   const sleep = options.sleep ?? realSleep;
 
-  const channels = resolveChannels(userId, template, options.channels, store);
+  const channels = await resolveChannels(userId, template, options.channels, store);
   const results: ChannelResult[] = [];
 
   for (const channel of channels) {

@@ -175,16 +175,18 @@ export class PaystackProvider implements PaymentProvider {
   async verifyPayment(input: {
     externalRefSource: string
     externalRef: string
-  }): Promise<{ status: InternalPaymentStatus; providerStatus?: string }> {
+  }): Promise<{ status: InternalPaymentStatus; providerStatus?: string; amountMinor?: number }> {
     const data = await paystackGet<{
       status: string
       gateway_response?: string
+      /** Paystack reports amounts in kobo. */
+      amount?: number
     }>(`/transaction/verify/${encodeURIComponent(input.externalRef)}`)
 
     const providerStatus = data.status
     const mapped = PAYSTACK_TX_STATUS_MAP[providerStatus] ?? 'pending'
 
-    return { status: mapped, providerStatus }
+    return { status: mapped, providerStatus, amountMinor: data.amount }
   }
 
   // ---- Webhook parsing & validation ---------------------------------------

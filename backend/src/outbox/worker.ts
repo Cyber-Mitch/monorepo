@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { SorobanAdapter } from '../soroban/adapter.js'
 import { outboxStore } from './store.js'
 import { OutboxSender } from './sender.js'
-import { OutboxStatus, type OutboxItem } from './types.js'
+import { ALLOWLIST_TX_TYPES, OutboxStatus, type OutboxItem } from './types.js'
 import { outboxProcessor } from '../services/outboxProcessor.js'
 import { outboxConfig } from '../config/outboxConfig.js'
 import { logger } from '../utils/logger.js'
@@ -54,9 +54,10 @@ export class OutboxWorker {
 
     // -------------------------------------------------------------------
     // Phase 1: Atomically claim PENDING items (SELECT FOR UPDATE SKIP LOCKED)
-    // so that two concurrent workers never process the same row.
+    // so that two concurrent workers never process the same row. Allowlist
+    // items belong to AllowlistSyncWorker and are never claimed here (#1952).
     // -------------------------------------------------------------------
-    const pending = await outboxStore.lockForProcessing(50, this.workerId)
+    const pending = await outboxStore.lockForProcessing(50, this.workerId, ALLOWLIST_TX_TYPES)
     recordOutboxPending(pending.length)
 
     for (const item of pending) {
@@ -88,6 +89,7 @@ export class OutboxWorker {
     // -------------------------------------------------------------------
     const failed = await outboxStore.listByStatus(OutboxStatus.FAILED)
     for (const item of failed) {
+      if (ALLOWLIST_TX_TYPES.includes(item.txType)) continue
       if (item.retryCount >= outboxConfig.maxAttempts) {
         await outboxProcessor.promoteToDeadLetter(item, 'Max retry count reached')
         recordOutboxFailed('max_retry_count_reached')

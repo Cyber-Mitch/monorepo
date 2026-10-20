@@ -24,18 +24,24 @@ describe('resolveChannels', () => {
     store = new InMemoryNotificationPreferenceStore()
   })
 
-  it('defaults to all channels when none requested', () => {
-    expect(resolveChannels('u1', 'payment_due', undefined, store)).toEqual(['in_app', 'email', 'push'])
+  it('defaults to all channels when none requested', async () => {
+    expect(await resolveChannels('u1', 'payment_due', undefined, store)).toEqual(['in_app', 'email', 'push'])
   })
 
-  it('drops channels the user opted out of for that template', () => {
-    store.optOut('u1', 'payment_due', 'email')
-    expect(resolveChannels('u1', 'payment_due', ['email', 'in_app'], store)).toEqual(['in_app'])
+  it('drops channels the user opted out of for that template', async () => {
+    await store.optOut('u1', 'payment_due', 'email')
+    expect(await resolveChannels('u1', 'payment_due', ['email', 'in_app'], store)).toEqual(['in_app'])
   })
 
-  it('opt-out is scoped per template', () => {
-    store.optOut('u1', 'payment_due', 'email')
-    expect(resolveChannels('u1', 'payment_received', ['email'], store)).toEqual(['email'])
+  it('opt-out is scoped per template', async () => {
+    await store.optOut('u1', 'payment_due', 'email')
+    expect(await resolveChannels('u1', 'payment_received', ['email'], store)).toEqual(['email'])
+  })
+
+  it('re-enables a channel after opt-in', async () => {
+    await store.optOut('u1', 'payment_due', 'email')
+    await store.optIn('u1', 'payment_due', 'email')
+    expect(await resolveChannels('u1', 'payment_due', ['email'], store)).toEqual(['email'])
   })
 })
 
@@ -65,7 +71,7 @@ describe('dispatchNotification', () => {
   })
 
   it('does not send on a channel the user opted out of', async () => {
-    store.optOut('u1', 'payment_due', 'email')
+    await store.optOut('u1', 'payment_due', 'email')
     const email = vi.fn<ChannelAdapter>(async () => {})
     const inApp = vi.fn<ChannelAdapter>(async () => {})
     const result = await dispatchNotification(
@@ -78,6 +84,17 @@ describe('dispatchNotification', () => {
     expect(email).not.toHaveBeenCalled()
     expect(inApp).toHaveBeenCalledOnce()
     expect(result.results.map((r) => r.channel)).toEqual(['in_app'])
+  })
+
+  it('honours an opt-out read from the store on every dispatch', async () => {
+    const email = vi.fn<ChannelAdapter>(async () => {})
+    await dispatchNotification('u1', 'kyc_approved', {}, { email }, { channels: ['email'], store, sleep: noSleep })
+    expect(email).toHaveBeenCalledOnce()
+
+    await store.optOut('u1', 'kyc_approved', 'email')
+    const second = await dispatchNotification('u1', 'kyc_approved', {}, { email }, { channels: ['email'], store, sleep: noSleep })
+    expect(email).toHaveBeenCalledOnce()
+    expect(second.results).toEqual([])
   })
 
   it('retries a failing channel up to the max then marks it failed', async () => {
