@@ -608,6 +608,151 @@ async requestRentRelease(params: RequestRentReleaseParams): Promise<void> {
           return `stub_tx_hash_epoch_${call}_${user}`
      }
 
+     // stake_delegation contract (#1885), in memory.
+     private static stubDelegations = new Map<string, Array<{ delegatee: string; amount: bigint; cooldownEndTs: number }>>()
+     private static stubDelegatees = new Map<string, { address: string; totalDelegated: bigint; commissionBps: number }>()
+     private static stubDelegationEpoch = 1
+
+     private requireStakeDelegationId(): string {
+          if (!this.config.stakeDelegationId) {
+               throw new Error('SOROBAN_STAKE_DELEGATION_ID not configured')
+          }
+          return this.config.stakeDelegationId
+     }
+
+     async prepareDelegationCall(call: string, user: string, amount?: bigint, delegatee?: string): Promise<string> {
+          const contractId = this.requireStakeDelegationId()
+          const args = this.delegationCallArgs(call, user, amount, delegatee)
+          return this.buildUnsigned(contractId, user, call, args)
+     }
+
+     async submitDelegationCall(
+          signedXdr: string,
+          call: string,
+          user: string,
+          amount?: bigint,
+          delegatee?: string,
+     ): Promise<string> {
+          const contractId = this.requireStakeDelegationId()
+          assertSignedInvocation(signedXdr, {
+               contractId,
+               functionName: call,
+               args: this.delegationCallArgs(call, user, amount, delegatee),
+               signer: user,
+               networkPassphrase: this.config.networkPassphrase,
+               label: `delegation ${call}`,
+          })
+          // Update stub state based on the call
+          if (call === 'stake' && amount) {
+               // Stake adds to the user's delegated amount (or creates new delegation)
+               const existing = StubSorobanAdapter.stubDelegations.get(user) ?? []
+               if (existing.length === 0) {
+                    StubSorobanAdapter.stubDelegations.set(user, [{ delegatee: user, amount, cooldownEndTs: 0 }])
+               } else {
+                    existing[0].amount += amount
+               }
+          } else if (call === 'unstake' && amount) {
+               const existing = StubSorobanAdapter.stubDelegations.get(user)
+               if (existing && existing.length > 0) {
+                    existing[0].amount = existing[0].amount > amount ? existing[0].amount - amount : 0n
+               }
+          } else if (call === 'delegate' && delegatee) {
+               // Replace any existing delegation with the new delegatee
+               const cooldown = 7 * 24 * 60 * 60 // 7 days in seconds
+               StubSorobanAdapter.stubDelegations.set(user, [{
+                    delegatee,
+                    amount: 0n,
+                    cooldownEndTs: Math.floor(Date.now() / 1000) + cooldown,
+               }])
+          } else if (call === 'request_undelegate') {
+               const existing = StubSorobanAdapter.stubDelegations.get(user)
+               if (existing && existing.length > 0) {
+                    const cooldown = 7 * 24 * 60 * 60
+                    existing[0].cooldownEndTs = Math.floor(Date.now() / 1000) + cooldown
+               }
+          } else if (call === 'complete_undelegate') {
+               StubSorobanAdapter.stubDelegations.delete(user)
+          }
+          return `stub_tx_hash_delegation_${call}_${user}`
+     }
+
+     private delegationCallArgs(call: string, user: string, amount?: bigint, delegatee?: string): xdr.ScVal[] {
+          const userArg = nativeToScVal(new Address(user))
+          switch (call) {
+               case 'stake':
+               case 'unstake':
+                    if (!amount || amount <= 0n) throw new Error(`${call} needs a positive amount`)
+                    return [userArg, nativeToScVal(amount, { type: 'i128' })]
+               case 'delegate':
+                    if (!delegatee) throw new Error('delegate needs a delegatee')
+                    return [userArg, nativeToScVal(new Address(delegatee))]
+               case 'request_undelegate':
+               case 'complete_undelegate':
+                    return [userArg]
+               default:
+                    throw new Error(`Unknown delegation call: ${call}`)
+          }
+     }
+
+     async getDelegations(user: string): Promise<Array<{ delegatee: string; amount: bigint; cooldownEndTs: number }>> {
+          return StubSorobanAdapter.stubDelegations.get(user) ?? []
+     }
+
+     async delegationStakedBalance(user: string): Promise<bigint> {
+          const delegations = await this.getDelegations(user)
+          return delegations.reduce((sum, d) => sum + d.amount, 0n)
+     }
+
+     async listDelegatees(): Promise<Array<{ address: string; totalDelegated: bigint; commissionBps: number }>> {
+          return Array.from(StubSorobanAdapter.stubDelegatees.values())
+     }
+
+     async delegationCurrentEpoch(): Promise<number> {
+          return StubSorobanAdapter.stubDelegationEpoch
+     }
+
+     async setCommission(operator: string, commissionBps: number): Promise<string> {
+          const existing = StubSorobanAdapter.stubDelegatees.get(operator)
+          StubSorobanAdapter.stubDelegatees.set(operator, {
+               address: operator,
+               totalDelegated: existing?.totalDelegated ?? 0n,
+               commissionBps,
+          })
+          return `stub_tx_hash_set_commission_${operator}`
+     }
+
+     async claimCommission(operator: string): Promise<string> {
+          return `stub_tx_hash_claim_commission_${operator}`
+     }
+
+     async claimDelegateeRewards(user: string): Promise<string> {
+          return `stub_tx_hash_claim_delegatee_rewards_${user}`
+     }
+
+     async prepareSetCommission(operator: string, commissionBps: number): Promise<string> {
+          return this.prepareDelegationCall('set_commission', operator, BigInt(commissionBps))
+     }
+
+     async submitSetCommission(signedXdr: string, operator: string, commissionBps: number): Promise<string> {
+          return this.submitDelegationCall(signedXdr, 'set_commission', operator, BigInt(commissionBps))
+     }
+
+     async prepareClaimCommission(operator: string): Promise<string> {
+          return this.prepareDelegationCall('claim_commission', operator)
+     }
+
+     async submitClaimCommission(signedXdr: string, operator: string): Promise<string> {
+          return this.submitDelegationCall(signedXdr, 'claim_commission', operator)
+     }
+
+     async prepareClaimDelegateeRewards(user: string): Promise<string> {
+          return this.prepareDelegationCall('claim_delegatee_rewards', user)
+     }
+
+     async submitClaimDelegateeRewards(signedXdr: string, user: string): Promise<string> {
+          return this.submitDelegationCall(signedXdr, 'claim_delegatee_rewards', user)
+     }
+
      // multisig_admin contract (#1972), in memory.
      multisigTargetFor(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
           return contract === 'dealEscrow' ? this.config.dealEscrowId : this.config.contractAccessId

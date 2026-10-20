@@ -3441,6 +3441,262 @@ export class RealSorobanAdapter implements SorobanAdapter {
     return txHash
   }
 
+  // ── stake_delegation contract (#1885) ────────────────────────────────────────
+
+  private getStakeDelegationId(): string {
+    if (!this.config.stakeDelegationId) {
+      throw new ConfigurationError('SOROBAN_STAKE_DELEGATION_ID not configured')
+    }
+    return this.config.stakeDelegationId
+  }
+
+  /** Arguments of a user-signed delegation call. */
+  private delegationCallArgs(call: string, user: string, amount?: bigint, delegatee?: string): xdr.ScVal[] {
+    const userArg = nativeToScVal(new Address(user))
+    switch (call) {
+      case 'stake':
+      case 'unstake':
+        if (amount === undefined || amount <= 0n) {
+          throw new ContractError(`${call} needs a positive amount`, this.getStakeDelegationId(), call)
+        }
+        return [userArg, nativeToScVal(amount, { type: 'i128' })]
+      case 'delegate':
+        if (!delegatee) {
+          throw new ContractError('delegate needs a delegatee address', this.getStakeDelegationId(), call)
+        }
+        return [userArg, nativeToScVal(new Address(delegatee))]
+      case 'request_undelegate':
+      case 'complete_undelegate':
+        return [userArg]
+      default:
+        throw new ContractError(`Unknown delegation call: ${call}`, this.getStakeDelegationId(), call)
+    }
+  }
+
+  async prepareDelegationCall(call: string, user: string, amount?: bigint, delegatee?: string): Promise<string> {
+    return this.prepareUserInvocation(
+      this.getStakeDelegationId(),
+      user,
+      call,
+      this.delegationCallArgs(call, user, amount, delegatee),
+    )
+  }
+
+  async submitDelegationCall(
+    signedXdr: string,
+    call: string,
+    user: string,
+    amount?: bigint,
+    delegatee?: string,
+  ): Promise<string> {
+    const tx = assertSignedInvocation(signedXdr, {
+      contractId: this.getStakeDelegationId(),
+      functionName: call,
+      args: this.delegationCallArgs(call, user, amount, delegatee),
+      signer: user,
+      networkPassphrase: this.config.networkPassphrase,
+      label: `delegation ${call}`,
+    })
+    const txHash = await this.broadcastSigned(tx, call)
+    logger.info('Delegation call submitted', { call, user, delegatee, txHash })
+    return txHash
+  }
+
+  async getDelegations(user: string): Promise<Array<{ delegatee: string; amount: bigint; cooldownEndTs: number }>> {
+    const contractId = this.getStakeDelegationId()
+    try {
+      const result = await this.invokeReadOnly(
+        contractId,
+        'get_delegations',
+        [nativeToScVal(new Address(user))],
+      )
+      const delegations = scValToNative(result) as Array<{
+        delegatee: string
+        amount: string
+        cooldown_end_ts: number
+      }> | null
+      if (!delegations) return []
+      return delegations.map((d) => ({
+        delegatee: d.delegatee,
+        amount: BigInt(d.amount),
+        cooldownEndTs: Number(d.cooldown_end_ts),
+      }))
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to read delegations', contractId, 'get_delegations', err)
+    }
+  }
+
+  async delegationStakedBalance(user: string): Promise<bigint> {
+    const contractId = this.getStakeDelegationId()
+    try {
+      const result = await this.invokeReadOnly(
+        contractId,
+        'staked_balance',
+        [nativeToScVal(new Address(user))],
+      )
+      return BigInt(scValToNative(result))
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to read staked balance', contractId, 'staked_balance', err)
+    }
+  }
+
+  async listDelegatees(): Promise<Array<{ address: string; totalDelegated: bigint; commissionBps: number }>> {
+    const contractId = this.getStakeDelegationId()
+    try {
+      const result = await this.invokeReadOnly(contractId, 'get_delegatees', [])
+      const delegatees = scValToNative(result) as Array<{
+        address: string
+        total_delegated: string
+        commission_bps: number
+      }> | null
+      if (!delegatees) return []
+      return delegatees.map((d) => ({
+        address: d.address,
+        totalDelegated: BigInt(d.total_delegated),
+        commissionBps: Number(d.commission_bps),
+      }))
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to list delegatees', contractId, 'get_delegatees', err)
+    }
+  }
+
+  async delegationCurrentEpoch(): Promise<number> {
+    const contractId = this.getStakeDelegationId()
+    try {
+      const result = await this.invokeReadOnly(contractId, 'current_epoch_num', [])
+      return Number(scValToNative(result))
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to read current epoch', contractId, 'current_epoch_num', err)
+    }
+  }
+
+  async setCommission(operator: string, commissionBps: number): Promise<string> {
+    const contractId = this.getStakeDelegationId()
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for set_commission')
+    }
+    const args: xdr.ScVal[] = [
+      nativeToScVal(new Address(operator)),
+      nativeToScVal(commissionBps, { type: 'u32' }),
+    ]
+    const txHash = await this.adminSigningService.execute({
+      contractId,
+      operation: 'set_commission',
+      args,
+    })
+    logger.info('Commission set on-chain', { operator, commissionBps })
+    return txHash
+  }
+
+  async claimCommission(operator: string): Promise<string> {
+    const contractId = this.getStakeDelegationId()
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for claim_commission')
+    }
+    const args: xdr.ScVal[] = [nativeToScVal(new Address(operator))]
+    const txHash = await this.adminSigningService.execute({
+      contractId,
+      operation: 'claim_commission',
+      args,
+    })
+    logger.info('Commission claimed on-chain', { operator })
+    return txHash
+  }
+
+  async claimDelegateeRewards(user: string): Promise<string> {
+    const contractId = this.getStakeDelegationId()
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for claim_delegatee_rewards')
+    }
+    const args: xdr.ScVal[] = [nativeToScVal(new Address(user))]
+    const txHash = await this.adminSigningService.execute({
+      contractId,
+      operation: 'claim_delegatee_rewards',
+      args,
+    })
+    logger.info('Delegatee rewards claimed on-chain', { user })
+    return txHash
+  }
+
+  async prepareSetCommission(operator: string, commissionBps: number): Promise<string> {
+    return this.prepareUserInvocation(
+      this.getStakeDelegationId(),
+      operator,
+      'set_commission',
+      [
+        nativeToScVal(new Address(operator)),
+        nativeToScVal(commissionBps, { type: 'u32' }),
+      ],
+    )
+  }
+
+  async submitSetCommission(signedXdr: string, operator: string, commissionBps: number): Promise<string> {
+    const tx = assertSignedInvocation(signedXdr, {
+      contractId: this.getStakeDelegationId(),
+      functionName: 'set_commission',
+      args: [
+        nativeToScVal(new Address(operator)),
+        nativeToScVal(commissionBps, { type: 'u32' }),
+      ],
+      signer: operator,
+      networkPassphrase: this.config.networkPassphrase,
+      label: 'set commission',
+    })
+    const txHash = await this.broadcastSigned(tx, 'set_commission')
+    logger.info('Set commission submitted', { operator, commissionBps, txHash })
+    return txHash
+  }
+
+  async prepareClaimCommission(operator: string): Promise<string> {
+    return this.prepareUserInvocation(
+      this.getStakeDelegationId(),
+      operator,
+      'claim_commission',
+      [nativeToScVal(new Address(operator))],
+    )
+  }
+
+  async submitClaimCommission(signedXdr: string, operator: string): Promise<string> {
+    const tx = assertSignedInvocation(signedXdr, {
+      contractId: this.getStakeDelegationId(),
+      functionName: 'claim_commission',
+      args: [nativeToScVal(new Address(operator))],
+      signer: operator,
+      networkPassphrase: this.config.networkPassphrase,
+      label: 'claim commission',
+    })
+    const txHash = await this.broadcastSigned(tx, 'claim_commission')
+    logger.info('Claim commission submitted', { operator, txHash })
+    return txHash
+  }
+
+  async prepareClaimDelegateeRewards(user: string): Promise<string> {
+    return this.prepareUserInvocation(
+      this.getStakeDelegationId(),
+      user,
+      'claim_delegatee_rewards',
+      [nativeToScVal(new Address(user))],
+    )
+  }
+
+  async submitClaimDelegateeRewards(signedXdr: string, user: string): Promise<string> {
+    const tx = assertSignedInvocation(signedXdr, {
+      contractId: this.getStakeDelegationId(),
+      functionName: 'claim_delegatee_rewards',
+      args: [nativeToScVal(new Address(user))],
+      signer: user,
+      networkPassphrase: this.config.networkPassphrase,
+      label: 'claim delegatee rewards',
+    })
+    const txHash = await this.broadcastSigned(tx, 'claim_delegatee_rewards')
+    logger.info('Claim delegatee rewards submitted', { user, txHash })
+    return txHash
+  }
+
   // ── multisig_admin contract (#1972) ─────────────────────────────────────────
 
   multisigTargetFor(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
