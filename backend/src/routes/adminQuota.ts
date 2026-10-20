@@ -1,12 +1,11 @@
 import { Router, Response } from 'express'
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { quotaManager } from '../services/QuotaManager.js'
 import { burstRateLimiter } from '../services/BurstRateLimiter.js'
 import { validate } from '../middleware/validate.js'
 import { z } from 'zod'
-import { logger } from '../utils/logger.js'
-import { AppError } from '../errors/AppError.js'
-import { ErrorCode } from '../errors/errorCodes.js'
+import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
 
 const router = Router()
 
@@ -25,30 +24,15 @@ const removeOverrideSchema = z.object({
 })
 
 /**
- * Helper function to check admin access
- * Since the User type doesn't include 'admin' role, we'll use a simple check
- * In production, this should be replaced with proper role-based access control
- */
-function isAdmin(user: any): boolean {
-  // For now, we'll check if the user has an admin flag or specific permission
-  // This is a placeholder - implement proper RBAC
-  return user?.isAdmin === true || user?.role === 'admin'
-}
-
-/**
  * Get quota usage for a user
  * GET /api/admin/quota/usage/:userId
  */
 router.get(
   '/usage/:userId',
   authenticateToken,
+  requirePermission('quota', 'view'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      // Admin-only check
-      if (!isAdmin(req.user)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-      }
-
       const { userId } = req.params
       const endpoint = req.query.endpoint as string | undefined
 
@@ -67,13 +51,9 @@ router.get(
 router.get(
   '/overrides/:userId',
   authenticateToken,
+  requirePermission('quota', 'view'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      // Admin-only check
-      if (!isAdmin(req.user)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-      }
-
       const { userId } = req.params
       const overrides = await quotaManager.getUserOverrides(userId)
       res.json({ overrides })
@@ -90,14 +70,10 @@ router.get(
 router.post(
   '/override',
   authenticateToken,
+  requirePermission('quota', 'manage'),
   validate(createOverrideSchema, 'body'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      // Admin-only check
-      if (!isAdmin(req.user)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-      }
-
       const { userId, endpoint, elevatedLimit, reason, expiresAt } = req.body
 
       const override = await quotaManager.setOverride({
@@ -110,9 +86,7 @@ router.post(
         expiresAt,
       })
 
-      // Log admin action for audit
-      logger.warn('Admin created quota override', {
-        adminId: req.user!.id,
+      auditLog('ADMIN_QUOTA_OVERRIDE_CREATED', extractAuditContext(req, 'admin'), {
         userId,
         endpoint,
         elevatedLimit,
@@ -134,21 +108,15 @@ router.post(
 router.delete(
   '/override',
   authenticateToken,
+  requirePermission('quota', 'manage'),
   validate(removeOverrideSchema, 'body'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      // Admin-only check
-      if (!isAdmin(req.user)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-      }
-
       const { userId, endpoint } = req.body
 
       await quotaManager.removeOverride(userId, endpoint)
 
-      // Log admin action for audit
-      logger.info('Admin removed quota override', {
-        adminId: req.user!.id,
+      auditLog('ADMIN_QUOTA_OVERRIDE_REMOVED', extractAuditContext(req, 'admin'), {
         userId,
         endpoint,
       })
@@ -167,13 +135,9 @@ router.delete(
 router.get(
   '/stats',
   authenticateToken,
+  requirePermission('quota', 'view'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      // Admin-only check
-      if (!isAdmin(req.user)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-      }
-
       const stats = await quotaManager.getQuotaStats()
       res.json(stats)
     } catch (error) {
@@ -189,22 +153,16 @@ router.get(
 router.post(
   '/reset',
   authenticateToken,
+  requirePermission('quota', 'manage'),
   validate(z.object({ userId: z.string().min(1), endpoint: z.string().optional() }), 'body'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      // Admin-only check
-      if (!isAdmin(req.user)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-      }
-
       const { userId, endpoint } = req.body
       const key = `ratelimit:user:${userId}${endpoint ? `:${endpoint}` : ''}`
 
       await burstRateLimiter.resetQuota(key)
 
-      // Log admin action for audit
-      logger.warn('Admin reset user quota', {
-        adminId: req.user!.id,
+      auditLog('ADMIN_QUOTA_RESET', extractAuditContext(req, 'admin'), {
         userId,
         endpoint,
       })

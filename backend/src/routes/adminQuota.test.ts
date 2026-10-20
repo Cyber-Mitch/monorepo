@@ -59,7 +59,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -90,7 +90,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'tenant-123', isAdmin: false }
+        req.user = { id: 'tenant-123', role: 'tenant' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -100,7 +100,7 @@ describe('Admin Quota Routes', () => {
 
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe('FORBIDDEN')
-      expect(res.body.error.message).toBe('Admin access required')
+      expect(res.body.error.message).toBe('Forbidden')
     })
 
     it('should allow user with admin role', async () => {
@@ -136,7 +136,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -167,7 +167,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -197,7 +197,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'tenant-123', isAdmin: false }
+        req.user = { id: 'tenant-123', role: 'tenant' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -214,7 +214,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -235,7 +235,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -270,7 +270,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -289,7 +289,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -312,7 +312,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -335,7 +335,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'tenant-123', isAdmin: false }
+        req.user = { id: 'tenant-123', role: 'tenant' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -358,7 +358,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -385,7 +385,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -410,7 +410,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -427,7 +427,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'tenant-123', isAdmin: false }
+        req.user = { id: 'tenant-123', role: 'tenant' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -446,7 +446,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -469,7 +469,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -494,7 +494,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'tenant-123', isAdmin: false }
+        req.user = { id: 'tenant-123', role: 'tenant' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -513,7 +513,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -535,7 +535,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -554,7 +554,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'admin-123', isAdmin: true }
+        req.user = { id: 'admin-123', role: 'admin' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
@@ -575,7 +575,7 @@ describe('Admin Quota Routes', () => {
       app.use(express.json())
       app.use((req: any, _res: any, next: any) => {
         req.requestId = 'test-request-id'
-        req.user = { id: 'tenant-123', isAdmin: false }
+        req.user = { id: 'tenant-123', role: 'tenant' }
         next()
       })
       app.use('/api/admin/quota', createAdminQuotaRouter())
