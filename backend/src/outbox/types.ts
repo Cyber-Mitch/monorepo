@@ -44,6 +44,12 @@ export enum TxType {
 }
 
 /**
+ * Tx types that AllowlistSyncWorker owns. The generic outbox worker leaves these
+ * rows alone, so the two workers never process the same item (#1952).
+ */
+export const ALLOWLIST_TX_TYPES: readonly TxType[] = [TxType.ALLOWLIST_ADD, TxType.ALLOWLIST_REMOVE]
+
+/**
  * Canonical external reference for idempotency
  * Format: {source}:{id}
  * Example: "stripe:pi_abc123", "manual:2024-01-15-tenant-001"

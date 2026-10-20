@@ -44,7 +44,11 @@ export interface IOutboxStore {
    * never claim the same row.  Stale claims (>5 min) are automatically released
    * and eligible for reclaim on the next poll cycle.
    */
-  lockForProcessing(limit: number, workerId: string): Promise<OutboxItem[]>
+  lockForProcessing(
+    limit: number,
+    workerId: string,
+    excludeTxTypes?: readonly TxType[],
+  ): Promise<OutboxItem[]>
 
   /**
    * Persist the Stellar tx hash immediately after signing but before broadcast.
@@ -229,13 +233,17 @@ export class InMemoryOutboxStore implements IOutboxStore {
     this.claims.clear()
   }
 
-  async lockForProcessing(limit: number, workerId: string): Promise<OutboxItem[]> {
+  async lockForProcessing(
+    limit: number,
+    workerId: string,
+    excludeTxTypes: readonly TxType[] = [],
+  ): Promise<OutboxItem[]> {
     const STALE_CLAIM_MS = 5 * 60 * 1000
     const now = Date.now()
     const results: OutboxItem[] = []
 
     for (const item of [...this.items.values()]
-      .filter((i) => i.status === OutboxStatus.PENDING)
+      .filter((i) => i.status === OutboxStatus.PENDING && !excludeTxTypes.includes(i.txType))
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())) {
       if (results.length >= limit) break
       const existing = this.claims.get(item.id)
@@ -453,7 +461,11 @@ export class PostgresOutboxStore implements IOutboxStore {
    * Uses a CTE with SELECT … FOR UPDATE SKIP LOCKED so concurrent workers
    * never receive the same row.  Stale claims (>5 min) are re-eligible.
    */
-  async lockForProcessing(limit: number, workerId: string): Promise<OutboxItem[]> {
+  async lockForProcessing(
+    limit: number,
+    workerId: string,
+    excludeTxTypes: readonly TxType[] = [],
+  ): Promise<OutboxItem[]> {
     const pool = await this.pool()
     const { rows } = await pool.query(
       `WITH to_claim AS (
@@ -461,6 +473,7 @@ export class PostgresOutboxStore implements IOutboxStore {
          WHERE status = 'pending'
            AND (claimed_by IS NULL
                 OR claimed_at < NOW() - INTERVAL '5 minutes')
+           AND NOT (tx_type = ANY($3::text[]))
          ORDER BY created_at ASC
          LIMIT $1
          FOR UPDATE SKIP LOCKED
@@ -471,7 +484,7 @@ export class PostgresOutboxStore implements IOutboxStore {
        FROM to_claim
        WHERE outbox_items.id = to_claim.id
        RETURNING outbox_items.*`,
-      [limit, workerId],
+      [limit, workerId, [...excludeTxTypes]],
     )
     return rows.map(mapRow)
   }

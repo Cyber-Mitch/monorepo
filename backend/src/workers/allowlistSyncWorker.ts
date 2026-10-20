@@ -2,6 +2,7 @@ import { SorobanAdapter } from '../soroban/adapter.js'
 import { logger } from '../utils/logger.js'
 import { outboxStore } from '../outbox/store.js'
 import { OutboxStatus, TxType, type OutboxItem } from '../outbox/types.js'
+import { outboxProcessor } from '../services/outboxProcessor.js'
 
 const MAX_ALLOWLIST_SYNC_RETRIES = 5
 const BASE_BACKOFF_MS = 1000
@@ -64,7 +65,8 @@ export class AllowlistSyncWorker {
     for (const item of items) {
       if (item.status === OutboxStatus.FAILED && !shouldRetry(item)) {
         if (item.retryCount >= MAX_ALLOWLIST_SYNC_RETRIES) {
-          await outboxStore.markDead(item.id, 'Max allowlist sync retry count reached')
+          // Dead-letter through the DLQ path so the item appears on the dead-letter page (#1914).
+          await outboxProcessor.promoteToDeadLetter(item, 'Max allowlist sync retry count reached')
           logger.error('Allowlist sync dead-lettered', {
             outboxId: item.id,
             txType: item.txType,
@@ -108,7 +110,7 @@ export class AllowlistSyncWorker {
       const nextRetryAt = new Date(Date.now() + getBackoffMs(currentRetryCount))
 
       if (currentRetryCount + 1 >= MAX_ALLOWLIST_SYNC_RETRIES) {
-        await outboxStore.markDead(item.id, errorMessage)
+        await outboxProcessor.promoteToDeadLetter(item, errorMessage)
         logger.error('Allowlist sync failed — dead-lettered', {
           outboxId: item.id,
           txType: item.txType,
