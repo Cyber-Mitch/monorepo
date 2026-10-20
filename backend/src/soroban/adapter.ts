@@ -404,6 +404,53 @@ export interface SorobanAdapter {
     amount?: bigint,
   ): Promise<string>
 
+  // stake_delegation contract — delegated staking where passive holders delegate to operators (#1885).
+  // Users sign stake/delegate/undelegate/request_undelegate/complete_undelegate in their own wallet.
+  // Operators claim commission and delegatee rewards.
+  /** A delegation entry returned by the contract. */
+  interface DelegationEntry {
+    delegatee: string
+    amount: bigint
+    cooldownEndTs: number
+  }
+  /** A delegatee (operator) entry from the contract. */
+  interface DelegateeEntry {
+    address: string
+    totalDelegated: bigint
+    commissionBps: number
+  }
+  /** Prepare an unsigned user-signed delegation call for wallet signing. */
+  prepareDelegationCall?(call: string, user: string, amount?: bigint, delegatee?: string): Promise<string>
+  /** Submit a signed user-signed delegation call. */
+  submitDelegationCall?(signedXdr: string, call: string, user: string, amount?: bigint, delegatee?: string): Promise<string>
+  /** Read a user's delegations (active and pending undelegations). */
+  getDelegations?(user: string): Promise<DelegationEntry[]>
+  /** Read a user's staked balance in the delegation contract. */
+  delegationStakedBalance?(user: string): Promise<bigint>
+  /** List available delegatees (operators) from the contract. */
+  listDelegatees?(): Promise<DelegateeEntry[]>
+  /** Get the current epoch number from the delegation contract. */
+  delegationCurrentEpoch?(): Promise<number>
+  /** Operator: set commission rate (basis points). */
+  /** Operator: set commission rate (basis points). */
+  setCommission?(operator: string, commissionBps: number): Promise<string>
+  /** Operator: claim accumulated commission. */
+  claimCommission?(operator: string): Promise<string>
+  /** User: claim rewards earned from being delegated to. */
+  claimDelegateeRewards?(user: string): Promise<string>
+  /** Operator: prepare unsigned set_commission for wallet signing. */
+  prepareSetCommission?(operator: string, commissionBps: number): Promise<string>
+  /** Operator: submit signed set_commission. */
+  submitSetCommission?(signedXdr: string, operator: string, commissionBps: number): Promise<string>
+  /** Operator: prepare unsigned claim_commission for wallet signing. */
+  prepareClaimCommission?(operator: string): Promise<string>
+  /** Operator: submit signed claim_commission. */
+  submitClaimCommission?(signedXdr: string, operator: string): Promise<string>
+  /** User: prepare unsigned claim_delegatee_rewards for wallet signing. */
+  prepareClaimDelegateeRewards?(user: string): Promise<string>
+  /** User: submit signed claim_delegatee_rewards. */
+  submitClaimDelegateeRewards?(signedXdr: string, user: string): Promise<string>
+
   // multisig_admin contract — M-of-N approval for privileged on-chain actions (#1972).
   // Signers approve with their own wallets (prepare/submit). When the multisig is
   // configured, selected admin operations are proposed through `multisigPropose`,

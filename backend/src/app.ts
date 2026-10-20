@@ -206,6 +206,7 @@ import { createFullPaymentRouter } from "./routes/fullPayment.js";
 import { createTenantSavedPropertiesRouter } from "./routes/tenantSavedProperties.js";
 import { createVestingRouter, createAdminVestingRouter } from "./routes/vesting.js";
 import { createEpochRewardsRouter, createAdminEpochRewardsRouter } from "./routes/epochRewards.js";
+import { createDelegationRouter } from "./routes/delegation.js";
 import { EpochSealJob } from "./jobs/epochSealJob.js";
 import { createMultisigAdminRouter } from "./routes/multisigAdmin.js";
 import {
@@ -1209,6 +1210,11 @@ export function createApp() {
       receiptRepo,
       conversionRateService,
     ),
+  );
+  app.use(
+    "/api/v1/staking/delegation",
+    requireFlag("STAKING_ENABLED"),
+    createDelegationRouter(sorobanAdapter, linkedAddressStore),
   );
   app.use("/api/v1/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/v1/deposits", createDepositsRouter(conversionService));

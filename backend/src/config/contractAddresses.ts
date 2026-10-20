@@ -10,6 +10,7 @@ export const CONTRACT_ENV_VARS = {
   stakingPool: 'SOROBAN_STAKING_POOL_ID',
   stakingRewards: 'SOROBAN_STAKING_REWARDS_ID',
   mvpStakingPool: 'SOROBAN_MVP_STAKING_POOL_ID',
+  stakeDelegation: 'SOROBAN_STAKE_DELEGATION_ID',
   timelock: 'SOROBAN_TIMELOCK_ID',
   inspectorBond: 'SOROBAN_INSPECTOR_BOND_ID',
   tenantReputation: 'SOROBAN_TENANT_REPUTATION_ID',

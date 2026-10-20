@@ -534,4 +534,141 @@ export class CircuitBreakerAdapter implements SorobanAdapter {
       this.wrappedAdapter.submitMultisigCall!(signedXdr, call, params),
     )
   }
+
+  // ── stake_delegation (#1885) ───────────────────────────────────────────────
+
+  async prepareDelegationCall?(call: string, user: string, amount?: bigint, delegatee?: string): Promise<string> {
+    if (!this.wrappedAdapter.prepareDelegationCall) {
+      throw new Error('prepareDelegationCall not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('prepareDelegationCall', () =>
+      this.wrappedAdapter.prepareDelegationCall!(call, user, amount, delegatee),
+    )
+  }
+
+  async submitDelegationCall?(signedXdr: string, call: string, user: string, amount?: bigint, delegatee?: string): Promise<string> {
+    if (!this.wrappedAdapter.submitDelegationCall) {
+      throw new Error('submitDelegationCall not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('submitDelegationCall', () =>
+      this.wrappedAdapter.submitDelegationCall!(signedXdr, call, user, amount, delegatee),
+    )
+  }
+
+  async getDelegations?(user: string): Promise<Array<{ delegatee: string; amount: bigint; cooldownEndTs: number }>> {
+    if (!this.wrappedAdapter.getDelegations) {
+      throw new Error('getDelegations not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('getDelegations', () =>
+      this.wrappedAdapter.getDelegations!(user),
+    )
+  }
+
+  async delegationStakedBalance?(user: string): Promise<bigint> {
+    if (!this.wrappedAdapter.delegationStakedBalance) {
+      throw new Error('delegationStakedBalance not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('delegationStakedBalance', () =>
+      this.wrappedAdapter.delegationStakedBalance!(user),
+    )
+  }
+
+  async listDelegatees?(): Promise<Array<{ address: string; totalDelegated: bigint; commissionBps: number }>> {
+    if (!this.wrappedAdapter.listDelegatees) {
+      throw new Error('listDelegatees not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('listDelegatees', () =>
+      this.wrappedAdapter.listDelegatees!(),
+    )
+  }
+
+  async delegationCurrentEpoch?(): Promise<number> {
+    if (!this.wrappedAdapter.delegationCurrentEpoch) {
+      throw new Error('delegationCurrentEpoch not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('delegationCurrentEpoch', () =>
+      this.wrappedAdapter.delegationCurrentEpoch!(),
+    )
+  }
+
+  async setCommission?(operator: string, commissionBps: number): Promise<string> {
+    if (!this.wrappedAdapter.setCommission) {
+      throw new Error('setCommission not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('setCommission', () =>
+      this.wrappedAdapter.setCommission!(operator, commissionBps),
+    )
+  }
+
+  async claimCommission?(operator: string): Promise<string> {
+    if (!this.wrappedAdapter.claimCommission) {
+      throw new Error('claimCommission not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('claimCommission', () =>
+      this.wrappedAdapter.claimCommission!(operator),
+    )
+  }
+
+  async claimDelegateeRewards?(user: string): Promise<string> {
+    if (!this.wrappedAdapter.claimDelegateeRewards) {
+      throw new Error('claimDelegateeRewards not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('claimDelegateeRewards', () =>
+      this.wrappedAdapter.claimDelegateeRewards!(user),
+    )
+  }
+
+  async prepareSetCommission?(operator: string, commissionBps: number): Promise<string> {
+    if (!this.wrappedAdapter.prepareSetCommission) {
+      throw new Error('prepareSetCommission not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('prepareSetCommission', () =>
+      this.wrappedAdapter.prepareSetCommission!(operator, commissionBps),
+    )
+  }
+
+  async submitSetCommission?(signedXdr: string, operator: string, commissionBps: number): Promise<string> {
+    if (!this.wrappedAdapter.submitSetCommission) {
+      throw new Error('submitSetCommission not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('submitSetCommission', () =>
+      this.wrappedAdapter.submitSetCommission!(signedXdr, operator, commissionBps),
+    )
+  }
+
+  async prepareClaimCommission?(operator: string): Promise<string> {
+    if (!this.wrappedAdapter.prepareClaimCommission) {
+      throw new Error('prepareClaimCommission not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('prepareClaimCommission', () =>
+      this.wrappedAdapter.prepareClaimCommission!(operator),
+    )
+  }
+
+  async submitClaimCommission?(signedXdr: string, operator: string): Promise<string> {
+    if (!this.wrappedAdapter.submitClaimCommission) {
+      throw new Error('submitClaimCommission not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('submitClaimCommission', () =>
+      this.wrappedAdapter.submitClaimCommission!(signedXdr, operator),
+    )
+  }
+
+  async prepareClaimDelegateeRewards?(user: string): Promise<string> {
+    if (!this.wrappedAdapter.prepareClaimDelegateeRewards) {
+      throw new Error('prepareClaimDelegateeRewards not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('prepareClaimDelegateeRewards', () =>
+      this.wrappedAdapter.prepareClaimDelegateeRewards!(user),
+    )
+  }
+
+  async submitClaimDelegateeRewards?(signedXdr: string, user: string): Promise<string> {
+    if (!this.wrappedAdapter.submitClaimDelegateeRewards) {
+      throw new Error('submitClaimDelegateeRewards not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('submitClaimDelegateeRewards', () =>
+      this.wrappedAdapter.submitClaimDelegateeRewards!(signedXdr, user),
+    )
+  }
 }

@@ -8,6 +8,7 @@ export type SorobanConfig = {
   stakingPoolId?: string
   stakingRewardsId?: string
   mvpStakingPoolId?: string
+  stakeDelegationId?: string
   usdcTokenId?: string
   dealEscrowId?: string
   rentPaymentsId?: string
@@ -39,6 +40,7 @@ export function getSorobanConfigFromEnv(env: NodeJS.ProcessEnv): SorobanConfig {
     stakingPoolId: addresses.stakingPool,
     stakingRewardsId: addresses.stakingRewards,
     mvpStakingPoolId: addresses.mvpStakingPool,
+    stakeDelegationId: addresses.stakeDelegation,
     usdcTokenId: addresses.usdcToken,
     dealEscrowId: addresses.dealEscrow,
     rentPaymentsId: addresses.rentPayments,

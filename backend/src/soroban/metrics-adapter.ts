@@ -344,6 +344,112 @@ export class MetricsSorobanAdapter implements SorobanAdapter {
     return this.trackCall('submitMultisigCall', () => this.wrapped.submitMultisigCall!(signedXdr, call, params));
   }
 
+  // stake_delegation (#1885)
+  async prepareDelegationCall?(call: string, user: string, amount?: bigint, delegatee?: string): Promise<string> {
+    if (!this.wrapped.prepareDelegationCall) {
+      throw new Error('prepareDelegationCall not implemented');
+    }
+    return this.trackCall('prepareDelegationCall', () => this.wrapped.prepareDelegationCall!(call, user, amount, delegatee));
+  }
+
+  async submitDelegationCall?(signedXdr: string, call: string, user: string, amount?: bigint, delegatee?: string): Promise<string> {
+    if (!this.wrapped.submitDelegationCall) {
+      throw new Error('submitDelegationCall not implemented');
+    }
+    return this.trackCall('submitDelegationCall', () => this.wrapped.submitDelegationCall!(signedXdr, call, user, amount, delegatee));
+  }
+
+  async getDelegations?(user: string): Promise<Array<{ delegatee: string; amount: bigint; cooldownEndTs: number }>> {
+    if (!this.wrapped.getDelegations) {
+      throw new Error('getDelegations not implemented');
+    }
+    return this.trackCall('getDelegations', () => this.wrapped.getDelegations!(user));
+  }
+
+  async delegationStakedBalance?(user: string): Promise<bigint> {
+    if (!this.wrapped.delegationStakedBalance) {
+      throw new Error('delegationStakedBalance not implemented');
+    }
+    return this.trackCall('delegationStakedBalance', () => this.wrapped.delegationStakedBalance!(user));
+  }
+
+  async listDelegatees?(): Promise<Array<{ address: string; totalDelegated: bigint; commissionBps: number }>> {
+    if (!this.wrapped.listDelegatees) {
+      throw new Error('listDelegatees not implemented');
+    }
+    return this.trackCall('listDelegatees', () => this.wrapped.listDelegatees!());
+  }
+
+  async delegationCurrentEpoch?(): Promise<number> {
+    if (!this.wrapped.delegationCurrentEpoch) {
+      throw new Error('delegationCurrentEpoch not implemented');
+    }
+    return this.trackCall('delegationCurrentEpoch', () => this.wrapped.delegationCurrentEpoch!());
+  }
+
+  async setCommission?(operator: string, commissionBps: number): Promise<string> {
+    if (!this.wrapped.setCommission) {
+      throw new Error('setCommission not implemented');
+    }
+    return this.trackCall('setCommission', () => this.wrapped.setCommission!(operator, commissionBps));
+  }
+
+  async claimCommission?(operator: string): Promise<string> {
+    if (!this.wrapped.claimCommission) {
+      throw new Error('claimCommission not implemented');
+    }
+    return this.trackCall('claimCommission', () => this.wrapped.claimCommission!(operator));
+  }
+
+  async claimDelegateeRewards?(user: string): Promise<string> {
+    if (!this.wrapped.claimDelegateeRewards) {
+      throw new Error('claimDelegateeRewards not implemented');
+    }
+    return this.trackCall('claimDelegateeRewards', () => this.wrapped.claimDelegateeRewards!(user));
+  }
+
+  async prepareSetCommission?(operator: string, commissionBps: number): Promise<string> {
+    if (!this.wrapped.prepareSetCommission) {
+      throw new Error('prepareSetCommission not implemented');
+    }
+    return this.trackCall('prepareSetCommission', () => this.wrapped.prepareSetCommission!(operator, commissionBps));
+  }
+
+  async submitSetCommission?(signedXdr: string, operator: string, commissionBps: number): Promise<string> {
+    if (!this.wrapped.submitSetCommission) {
+      throw new Error('submitSetCommission not implemented');
+    }
+    return this.trackCall('submitSetCommission', () => this.wrapped.submitSetCommission!(signedXdr, operator, commissionBps));
+  }
+
+  async prepareClaimCommission?(operator: string): Promise<string> {
+    if (!this.wrapped.prepareClaimCommission) {
+      throw new Error('prepareClaimCommission not implemented');
+    }
+    return this.trackCall('prepareClaimCommission', () => this.wrapped.prepareClaimCommission!(operator));
+  }
+
+  async submitClaimCommission?(signedXdr: string, operator: string): Promise<string> {
+    if (!this.wrapped.submitClaimCommission) {
+      throw new Error('submitClaimCommission not implemented');
+    }
+    return this.trackCall('submitClaimCommission', () => this.wrapped.submitClaimCommission!(signedXdr, operator));
+  }
+
+  async prepareClaimDelegateeRewards?(user: string): Promise<string> {
+    if (!this.wrapped.prepareClaimDelegateeRewards) {
+      throw new Error('prepareClaimDelegateeRewards not implemented');
+    }
+    return this.trackCall('prepareClaimDelegateeRewards', () => this.wrapped.prepareClaimDelegateeRewards!(user));
+  }
+
+  async submitClaimDelegateeRewards?(signedXdr: string, user: string): Promise<string> {
+    if (!this.wrapped.submitClaimDelegateeRewards) {
+      throw new Error('submitClaimDelegateeRewards not implemented');
+    }
+    return this.trackCall('submitClaimDelegateeRewards', () => this.wrapped.submitClaimDelegateeRewards!(signedXdr, user));
+  }
+
   /**
    * Helper method to track RPC calls with metrics
    */
