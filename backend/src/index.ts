@@ -15,6 +15,7 @@ import { ReconciliationWorker } from "./reconciliation/index.js"
 import { notificationWSS } from "./services/websocket/NotificationWebSocketServer.js"
 import { loadContractAddresses } from "./config/contractAddresses.js"
 import { RentWalletWorker } from "./workers/rentWalletWorker.js"
+import { SorobanEventIndexer } from "./workers/sorobanEventIndexer.js"
 import { createSorobanAdapter } from "./soroban/index.js"
 import { getSorobanConfigFromEnv } from "./soroban/client.js"
 import { closeDbPools } from "./db.js"
@@ -61,6 +62,13 @@ async function main() {
     const rentWalletWorker = new RentWalletWorker(sorobanAdapter)
     rentWalletWorker.start()
 
+    // Index on-chain contract events from the real RPC (#1951). The stub adapter has no chain to read.
+    const sorobanEventIndexer =
+      process.env.SOROBAN_ADAPTER_MODE === "real"
+        ? new SorobanEventIndexer({ rpcUrl: sorobanConfig.rpcUrl })
+        : null
+    void sorobanEventIndexer?.start()
+
     const server = app.listen(env.PORT, () => {
       console.log(`[backend] listening on http://localhost:${env.PORT}`)
     })
@@ -83,6 +91,7 @@ async function main() {
         clearInterval(inspectionClaimExpiryInterval)
         await reconciliationWorker.stop()
         await rentWalletWorker.stop()
+        await sorobanEventIndexer?.stop()
         if (outboxWorker) await outboxWorker.stop()
         await notificationWSS.close()
         if (typeof app.locals.shutdownWorkers === "function") {
