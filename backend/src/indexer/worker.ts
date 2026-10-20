@@ -61,6 +61,11 @@ export class ReceiptIndexer {
     this.currentBackoffMs = this.config.pollIntervalMs
   }
 
+  /** Read access to the receipt store for admin query routes. */
+  get receiptRepository(): ReceiptRepository {
+    return this.repo
+  }
+
   private stopPromise: Promise<void> | null = null
   private resolveStop: (() => void) | null = null
 

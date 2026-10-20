@@ -276,10 +276,8 @@ import {
   initTenantDataExportStore,
 } from "./models/tenantDataExportStore.js";
 import { createTenantDataExportRouter } from "./routes/tenantDataExport.js";
-import {
-  tenantDataExportJobHandler,
-  TENANT_DATA_EXPORT_JOB_NAME,
-} from "./jobs/tenantDataExportJob.js";
+import { tenantDataExportJobHandler } from "./jobs/tenantDataExportJob.js";
+import { TENANT_DATA_EXPORT_JOB_NAME } from "./services/tenantDataExportService.js";
 import { createWhistleblowerReportsRouter } from "./routes/whistleblowerReports.js";
 import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
 import { createDocsRouter } from "./routes/docs.js";

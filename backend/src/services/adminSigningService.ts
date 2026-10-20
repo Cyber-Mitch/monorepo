@@ -52,6 +52,16 @@ export type AdminOperation =
   | 'revoke'
   // multisig_admin (#1972): the platform key, as a registered signer, files proposals for covered admin actions.
   | 'propose'
+  // access-control, whistleblower_rewards, receipt, and recovery contract admin calls
+  | 'propose_assign_role'
+  | 'confirm_assign_role'
+  | 'delegate_permission'
+  | 'allocate'
+  | 'create_receipt'
+  | 'freeze'
+  | 'propose_drain'
+  | 'execute_drain'
+  | 'set_recovery_delay'
 
 /**
  * Parameters for admin operations
@@ -205,6 +215,15 @@ export class AdminSigningService {
       'fund_epoch_rewards',
       'seal_epoch',
       'propose',
+      'propose_assign_role',
+      'confirm_assign_role',
+      'delegate_permission',
+      'allocate',
+      'create_receipt',
+      'freeze',
+      'propose_drain',
+      'execute_drain',
+      'set_recovery_delay',
     ]
     if (!allowedOperations.includes(params.operation)) {
       throw new ConfigurationError(

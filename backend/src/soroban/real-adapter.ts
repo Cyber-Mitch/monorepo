@@ -2561,7 +2561,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
             nativeToScVal(amount, { type: 'i128' }),
           ],
           networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret,
+          adminSecret: adminKeypair.secret(),
           server: this.server,
         })
 
@@ -2617,7 +2617,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
             nativeToScVal(amount, { type: 'i128' }),
           ],
           networkPassphrase: this.config.networkPassphrase,
-          adminSecret: this.config.adminSecret,
+          adminSecret: adminKeypair.secret(),
           server: this.server,
         })
 
@@ -2658,11 +2658,9 @@ export class RealSorobanAdapter implements SorobanAdapter {
       })
 
       try {
-        const result = await this.invokeReadOnly({
-          contractId,
-          method: 'balance',
-          args: [nativeToScVal(new Address(account))],
-        })
+        const result = await this.invokeReadOnly(contractId, 'balance', [
+          nativeToScVal(new Address(account)),
+        ])
 
         const balance = scValToNative(result) as bigint
         span.setAttributes({ 'soroban.balance': balance.toString() })
@@ -2982,11 +2980,9 @@ export class RealSorobanAdapter implements SorobanAdapter {
       })
 
       try {
-        const result = await this.invokeReadOnly({
-          contractId,
-          method: 'get_bond',
-          args: [nativeToScVal(new Address(inspector))],
-        })
+        const result = await this.invokeReadOnly(contractId, 'get_bond', [
+          nativeToScVal(new Address(inspector)),
+        ])
 
         const balance = BigInt(scValToNative(result))
         span.setAttributes({ 'soroban.bond_balance': balance.toString() })
@@ -3022,8 +3018,6 @@ export class RealSorobanAdapter implements SorobanAdapter {
       throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for reward allocation')
     }
 
-    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
-
     const args = [
       nativeToScVal(new Address(whistleblower)),
       nativeToScVal(amount),
@@ -3035,19 +3029,16 @@ export class RealSorobanAdapter implements SorobanAdapter {
       args,
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
-      sourceAccount: adminAddress,
+      server: this.server,
     })
   }
 
   async claimReward(whistleblower: string): Promise<bigint> {
-    const contractId = this.getWhistleblowerRewardsId()
-    const args = [nativeToScVal(new Address(whistleblower))]
-
-    const txHash = await this.invokeContract(contractId, 'claim', args)
-    logger.info('Whistleblower reward claimed', { whistleblower, txHash })
-    
-    // Return the claimed amount - would need to parse from result or query separately
-    return this.getClaimableReward(whistleblower)
+    this.getWhistleblowerRewardsId()
+    // claim() requires the whistleblower's own signature, which the admin key cannot provide.
+    throw new ConfigurationError(
+      `Whistleblower reward claims for ${whistleblower} must be signed by the whistleblower's wallet`,
+    )
   }
 
   async getClaimableReward(whistleblower: string): Promise<bigint> {
@@ -3675,7 +3666,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       args,
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
-      sourceAccount: adminAddress,
+      server: this.server,
     })
   }
 
@@ -3735,7 +3726,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       args: [],
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
-      sourceAccount: adminAddress,
+      server: this.server,
     })
   }
 
@@ -3775,7 +3766,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       args: [nativeToScVal(new Address(destination))],
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
-      sourceAccount: adminAddress,
+      server: this.server,
     })
   }
 
@@ -3796,7 +3787,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       args: [],
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
-      sourceAccount: adminAddress,
+      server: this.server,
     })
   }
 
@@ -3817,7 +3808,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       args: [nativeToScVal(delaySeconds)],
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
-      sourceAccount: adminAddress,
+      server: this.server,
     })
   }
 
