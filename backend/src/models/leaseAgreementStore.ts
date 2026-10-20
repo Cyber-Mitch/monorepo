@@ -30,6 +30,7 @@ class InMemoryLeaseAgreementStore implements LeaseAgreementStorePort {
       dealId: input.dealId,
       documentKey: input.documentKey,
       documentHash: input.documentHash,
+      templateVersion: input.templateVersion,
       status: LeaseStatus.DRAFT,
       createdAt: now,
       updatedAt: now,
@@ -111,6 +112,7 @@ type LeaseRow = {
   deal_id: string
   document_key: string
   document_hash: string | null
+  template_version: string | null
   status: LeaseStatus
   tenant_signed_at: Date | null
   landlord_signed_at: Date | null
@@ -138,10 +140,17 @@ class PostgresLeaseAgreementStore implements LeaseAgreementStorePort {
     const leaseId = randomUUID()
 
     const { rows } = await pool.query(
-      `INSERT INTO lease_agreements (lease_id, deal_id, document_key, document_hash, status)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO lease_agreements (lease_id, deal_id, document_key, document_hash, template_version, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [leaseId, input.dealId, input.documentKey, input.documentHash ?? null, LeaseStatus.DRAFT],
+      [
+        leaseId,
+        input.dealId,
+        input.documentKey,
+        input.documentHash ?? null,
+        input.templateVersion ?? null,
+        LeaseStatus.DRAFT,
+      ],
     )
 
     return this.mapRow(rows[0] as LeaseRow)
@@ -246,6 +255,7 @@ class PostgresLeaseAgreementStore implements LeaseAgreementStorePort {
       dealId: row.deal_id,
       documentKey: row.document_key,
       documentHash: row.document_hash ?? undefined,
+      templateVersion: row.template_version ?? undefined,
       status: row.status,
       tenantSignedAt: row.tenant_signed_at ? new Date(row.tenant_signed_at) : undefined,
       landlordSignedAt: row.landlord_signed_at ? new Date(row.landlord_signed_at) : undefined,

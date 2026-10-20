@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { validate } from '../middleware/validate.js'
-import { idempotency } from '../middleware/idempotency.js'
+import { durableApiIdempotency } from '../middleware/durableApiIdempotency.js'
 import { confirmDepositSchema, type ConfirmDepositRequest } from '../schemas/deposit.js'
 import { depositStore } from '../models/depositStore.js'
 import { ConversionService } from '../services/conversionService.js'
@@ -19,7 +19,7 @@ export function createDepositsRouter(conversionService: ConversionService) {
    */
   router.post(
     '/confirm',
-    idempotency(),
+    durableApiIdempotency(),
     validate(confirmDepositSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {

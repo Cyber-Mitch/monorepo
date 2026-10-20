@@ -10,7 +10,8 @@ import { logger } from "../utils/logger.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { validate } from "../middleware/validate.js";
-import { env } from "../schemas/env.js";
+import { requireAdminSecret } from "../middleware/adminSecret.js";
+import { describeGateResult, executeOrPropose } from "../services/multisigGate.js";
 
 const proposeAssignRoleSchema = z.object({
   subject: z.string(),
@@ -38,14 +39,6 @@ const hasPermissionSchema = z.object({
 export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
   const router = Router();
 
-  // Admin auth guard helper
-  function requireAdminSecret(req: Request) {
-    const headerSecret = req.headers["x-admin-secret"];
-    if (env.MANUAL_ADMIN_SECRET && headerSecret !== env.MANUAL_ADMIN_SECRET) {
-      throw new AppError(ErrorCode.FORBIDDEN, 403, "Invalid admin secret");
-    }
-  }
-
   /**
    * POST /api/admin/contract-access/propose-assign-role
    * Propose assigning a role to a subject address
@@ -66,12 +59,28 @@ export function createAdminContractAccessRouter(adapter: SorobanAdapter) {
           );
         }
 
-        const txHash = await adapter.proposeAssignRole(subject, role);
+        // With a multisig configured this files a proposal instead of executing. The admin
+        // argument of the call becomes the multisig contract, which is then the caller.
+        const result = await executeOrPropose(adapter, {
+          operation: "propose_assign_role",
+          target: "contractAccess",
+          functionName: "propose_assign_role",
+          args: (multisigContractId) => [
+            { type: "address", value: multisigContractId },
+            { type: "address", value: subject },
+            { type: "u32", value: role },
+          ],
+          direct: () => adapter.proposeAssignRole!(subject, role),
+        });
 
-        res.json({
+        res.status(result.mode === "multisig" ? 202 : 200).json({
           success: true,
-          txHash,
-          message: "Role assignment proposed successfully",
+          txHash: result.txHash,
+          message:
+            result.mode === "multisig"
+              ? "Role assignment proposal filed with the multisig; it has not been executed"
+              : "Role assignment proposed successfully",
+          ...describeGateResult(result),
         });
       } catch (error) {
         next(error);

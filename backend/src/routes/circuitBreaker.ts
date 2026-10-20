@@ -11,12 +11,38 @@ import { ErrorCode } from "../errors/errorCodes.js";
 import { validate } from "../middleware/validate.js";
 import { requireAdminSecret } from "../middleware/adminSecret.js";
 import { auditLog, extractAuditContext } from "../utils/auditLogger.js";
+import { describeGateResult, executeOrPropose } from "../services/multisigGate.js";
 import { z } from "zod";
 
 // Validation schemas
+/** A BytesN<32>, as 64 hex characters, as the deal_escrow contract's drain functions take. */
+const drainHashSchema = z.string().regex(/^[0-9a-fA-F]{64}$/, "Must be 64 hex characters");
+
 const proposeDrainSchema = z.object({
   destination: z.string(),
+  // Only used when a multisig is configured: deal_escrow's propose_drain takes a hash.
+  drainHash: drainHashSchema.optional(),
 });
+
+const executeDrainSchema = z.object({
+  drainHash: drainHashSchema.optional(),
+});
+
+/**
+ * With a multisig configured the drain is proposed as the contract's own call,
+ * `propose_drain(admin, drain_hash)` / `execute_drain(admin, drain_hash)`, so
+ * the hash is required.
+ */
+function requireDrainHash(drainHash: string | undefined): string {
+  if (!drainHash) {
+    throw new AppError(
+      ErrorCode.VALIDATION_ERROR,
+      400,
+      "drainHash is required when a multisig is configured (deal_escrow's drain functions take a BytesN<32> hash)"
+    );
+  }
+  return drainHash;
+}
 
 const setRecoveryDelaySchema = z.object({
   delaySeconds: z.number().int().min(0),
@@ -106,7 +132,7 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
     validate(proposeDrainSchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const { destination } = req.body;
+        const { destination, drainHash } = req.body;
 
         if (!adapter.proposeDrain) {
           throw new AppError(
@@ -116,21 +142,41 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
           );
         }
 
-        const txHash = await adapter.proposeDrain(destination);
+        // With a multisig configured this files a proposal instead of executing.
+        const result = await executeOrPropose(adapter, {
+          operation: "propose_drain",
+          target: "dealEscrow",
+          functionName: "propose_drain",
+          args: (multisigContractId) => [
+            { type: "address", value: multisigContractId },
+            { type: "bytes32", value: requireDrainHash(drainHash) },
+          ],
+          direct: () => adapter.proposeDrain!(destination),
+        });
+        const { txHash } = result;
 
         await auditLog(
           "ADMIN_CIRCUIT_BREAKER_PROPOSE_DRAIN",
           extractAuditContext(req, "admin"),
-          { action: "propose-drain", destination, txHash },
+          {
+            action: "propose-drain",
+            destination,
+            txHash,
+            ...(result.mode === "multisig" ? { mode: "multisig", proposalId: result.proposalId } : {}),
+          },
           { durable: true }
         );
 
-        logger.info("Drain proposed", { destination, txHash });
+        logger.info("Drain proposed", { destination, txHash, mode: result.mode });
 
-        res.json({
+        res.status(result.mode === "multisig" ? 202 : 200).json({
           success: true,
           txHash,
-          message: "Drain proposed successfully",
+          message:
+            result.mode === "multisig"
+              ? "Drain proposal filed with the multisig; it has not been executed"
+              : "Drain proposed successfully",
+          ...describeGateResult(result),
         });
       } catch (error) {
         next(error);
@@ -145,8 +191,11 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
   router.post(
     "/execute-drain",
     requireAdminSecret,
+    validate(executeDrainSchema, 'body'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
+        const { drainHash } = req.body as { drainHash?: string };
+
         if (!adapter.executeDrain) {
           throw new AppError(
             ErrorCode.INTERNAL_ERROR,
@@ -155,21 +204,40 @@ export function createCircuitBreakerRouter(adapter: SorobanAdapter) {
           );
         }
 
-        const txHash = await adapter.executeDrain();
+        // With a multisig configured this files a proposal instead of executing.
+        const result = await executeOrPropose(adapter, {
+          operation: "execute_drain",
+          target: "dealEscrow",
+          functionName: "execute_drain",
+          args: (multisigContractId) => [
+            { type: "address", value: multisigContractId },
+            { type: "bytes32", value: requireDrainHash(drainHash) },
+          ],
+          direct: () => adapter.executeDrain!(),
+        });
+        const { txHash } = result;
 
         await auditLog(
           "ADMIN_CIRCUIT_BREAKER_EXECUTE_DRAIN",
           extractAuditContext(req, "admin"),
-          { action: "execute-drain", txHash },
+          {
+            action: "execute-drain",
+            txHash,
+            ...(result.mode === "multisig" ? { mode: "multisig", proposalId: result.proposalId } : {}),
+          },
           { durable: true }
         );
 
-        logger.info("Drain executed", { txHash });
+        logger.info("Drain executed", { txHash, mode: result.mode });
 
-        res.json({
+        res.status(result.mode === "multisig" ? 202 : 200).json({
           success: true,
           txHash,
-          message: "Drain executed successfully",
+          message:
+            result.mode === "multisig"
+              ? "Drain execution proposal filed with the multisig; it has not been executed"
+              : "Drain executed successfully",
+          ...describeGateResult(result),
         });
       } catch (error) {
         next(error);

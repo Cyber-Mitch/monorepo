@@ -197,6 +197,9 @@ import { createLandlordAnalyticsRouter } from "./routes/landlordAnalytics.js";
 import { createFullPaymentRouter } from "./routes/fullPayment.js";
 import { createTenantSavedPropertiesRouter } from "./routes/tenantSavedProperties.js";
 import { createVestingRouter, createAdminVestingRouter } from "./routes/vesting.js";
+import { createEpochRewardsRouter, createAdminEpochRewardsRouter } from "./routes/epochRewards.js";
+import { EpochSealJob } from "./jobs/epochSealJob.js";
+import { createMultisigAdminRouter } from "./routes/multisigAdmin.js";
 import {
   PostgresSavedPropertyStore,
   initSavedPropertyStore,
@@ -536,6 +539,16 @@ export function createApp() {
     workers.push(dataRetentionJob);
     monthlyDeductionReminderJob.start();
     workers.push(monthlyDeductionReminderJob);
+  }
+
+  // Seal each epoch_rewards epoch as soon as it ends (#1965). Idempotent, so safe on every instance.
+  if (env.NODE_ENV !== "test" && process.env.SOROBAN_EPOCH_REWARDS_ID) {
+    const epochSealJob = new EpochSealJob(
+      sorobanAdapter,
+      parseInt(process.env.EPOCH_SEAL_POLL_MS ?? "60000", 10),
+    );
+    epochSealJob.start();
+    workers.push(epochSealJob);
   }
 
   // Outbox store — swap to Postgres when DATABASE_URL is set
@@ -1059,6 +1072,9 @@ export function createApp() {
     app.use("/api/tenant/saved-properties", createTenantSavedPropertiesRouter());
     app.use("/api/vesting", createVestingRouter(sorobanAdapter, linkedAddressStore));
     app.use("/api/admin/vesting", createAdminVestingRouter(sorobanAdapter));
+    app.use("/api/epoch-rewards", createEpochRewardsRouter(sorobanAdapter, linkedAddressStore));
+    app.use("/api/admin/epoch-rewards", createAdminEpochRewardsRouter(sorobanAdapter));
+    app.use("/api/admin/multisig", createMultisigAdminRouter(sorobanAdapter, linkedAddressStore));
     app.use("/api/tenant/credit-score", createTenantCreditScoreRouter());
     app.use("/api/tenant/data-export", createTenantDataExportRouter());
     app.use("/api/admin/credit-score", createAdminCreditScoreRouter());
@@ -1201,6 +1217,9 @@ export function createApp() {
   app.use("/api/v1/tenant/saved-properties", createTenantSavedPropertiesRouter());
   app.use("/api/v1/vesting", createVestingRouter(sorobanAdapter, linkedAddressStore));
   app.use("/api/v1/admin/vesting", createAdminVestingRouter(sorobanAdapter));
+  app.use("/api/v1/epoch-rewards", createEpochRewardsRouter(sorobanAdapter, linkedAddressStore));
+  app.use("/api/v1/admin/epoch-rewards", createAdminEpochRewardsRouter(sorobanAdapter));
+  app.use("/api/v1/admin/multisig", createMultisigAdminRouter(sorobanAdapter, linkedAddressStore));
   app.use("/api/v1/tenant/credit-score", createTenantCreditScoreRouter());
   app.use("/api/v1/tenant/data-export", createTenantDataExportRouter());
   app.use("/api/v1/admin/credit-score", createAdminCreditScoreRouter());

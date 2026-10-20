@@ -28,7 +28,7 @@ import { logger } from '../utils/logger.js'
 import { recordDealActivationDuration } from '../metrics.js'
 import { applyDealRepaymentMethod } from '../services/salaryDeductionService.js'
 import { updateDealRepaymentSchema } from '../schemas/employer.js'
-import { idempotency } from '../middleware/idempotency.js'
+import { durableApiIdempotency } from '../middleware/durableApiIdempotency.js'
 import { dealStateMachine } from '../services/deals/DealStateMachine.js'
 import { wouldExceedEquityCap } from '../services/deals/rentToOwnConversion.js'
 
@@ -48,7 +48,7 @@ const router = Router()
  * Approach: First atomically lock the listing (check availability + lock in one transaction),
  * then create the deal. If deal creation fails, the listing remains locked (caller must handle cleanup).
  */
-router.post('/', idempotency(), async (req: Request, res: Response, next) => {
+router.post('/', durableApiIdempotency(), async (req: Request, res: Response, next) => {
   try {
     const validatedData: CreateDealRequest = createDealSchema.parse(req.body)
 

@@ -14,6 +14,14 @@ import {
   OraclePriceReading,
   CreateVestingScheduleParams,
   VestingScheduleRecord,
+  EpochRewardsCall,
+  EpochRewardsEpoch,
+  MultisigArg,
+  MultisigCall,
+  MultisigCallParams,
+  MultisigConfig,
+  MultisigProposal,
+  MultisigProposalStatus,
 } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
@@ -376,6 +384,154 @@ export class CircuitBreakerAdapter implements SorobanAdapter {
     }
     return this.executeWithCircuitBreaker('submitVestingClaim', () =>
       this.wrappedAdapter.submitVestingClaim!(signedXdr, beneficiary),
+    )
+  }
+  // ── epoch_rewards (#1965) and multisig_admin (#1972) ───────────────────────
+
+  multisigTargetFor?(contract: 'dealEscrow' | 'contractAccess'): string | undefined {
+    return this.wrappedAdapter.multisigTargetFor?.(contract)
+  }
+
+  multisigEnabled?(): boolean {
+    return this.wrappedAdapter.multisigEnabled?.() ?? false
+  }
+
+  multisigContractId?(): string | undefined {
+    return this.wrappedAdapter.multisigContractId?.()
+  }
+
+  async epochRewardsCurrentEpoch?(): Promise<number> {
+    if (!this.wrappedAdapter.epochRewardsCurrentEpoch) {
+      throw new Error('epochRewardsCurrentEpoch not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsCurrentEpoch', () =>
+      this.wrappedAdapter.epochRewardsCurrentEpoch!(),
+    )
+  }
+
+  async epochRewardsGetEpoch?(epochNumber: number): Promise<EpochRewardsEpoch | null> {
+    if (!this.wrappedAdapter.epochRewardsGetEpoch) {
+      throw new Error('epochRewardsGetEpoch not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsGetEpoch', () =>
+      this.wrappedAdapter.epochRewardsGetEpoch!(epochNumber),
+    )
+  }
+
+  async epochRewardsTotalStaked?(): Promise<bigint> {
+    if (!this.wrappedAdapter.epochRewardsTotalStaked) {
+      throw new Error('epochRewardsTotalStaked not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsTotalStaked', () =>
+      this.wrappedAdapter.epochRewardsTotalStaked!(),
+    )
+  }
+
+  async epochRewardsGetClaimable?(user: string): Promise<bigint> {
+    if (!this.wrappedAdapter.epochRewardsGetClaimable) {
+      throw new Error('epochRewardsGetClaimable not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsGetClaimable', () =>
+      this.wrappedAdapter.epochRewardsGetClaimable!(user),
+    )
+  }
+
+  async epochRewardsGetStake?(user: string): Promise<bigint | null> {
+    if (!this.wrappedAdapter.epochRewardsGetStake) {
+      throw new Error('epochRewardsGetStake not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsGetStake', () =>
+      this.wrappedAdapter.epochRewardsGetStake!(user),
+    )
+  }
+
+  async epochRewardsFund?(amount: bigint): Promise<string> {
+    if (!this.wrappedAdapter.epochRewardsFund) {
+      throw new Error('epochRewardsFund not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsFund', () =>
+      this.wrappedAdapter.epochRewardsFund!(amount),
+    )
+  }
+
+  async epochRewardsSeal?(targetEpoch: number, nextEpochDurationSecs: number): Promise<string> {
+    if (!this.wrappedAdapter.epochRewardsSeal) {
+      throw new Error('epochRewardsSeal not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('epochRewardsSeal', () =>
+      this.wrappedAdapter.epochRewardsSeal!(targetEpoch, nextEpochDurationSecs),
+    )
+  }
+
+  async prepareEpochRewardsCall?(call: EpochRewardsCall, user: string, amount?: bigint): Promise<string> {
+    if (!this.wrappedAdapter.prepareEpochRewardsCall) {
+      throw new Error('prepareEpochRewardsCall not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('prepareEpochRewardsCall', () =>
+      this.wrappedAdapter.prepareEpochRewardsCall!(call, user, amount),
+    )
+  }
+
+  async submitEpochRewardsCall?(signedXdr: string, call: EpochRewardsCall, user: string, amount?: bigint): Promise<string> {
+    if (!this.wrappedAdapter.submitEpochRewardsCall) {
+      throw new Error('submitEpochRewardsCall not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('submitEpochRewardsCall', () =>
+      this.wrappedAdapter.submitEpochRewardsCall!(signedXdr, call, user, amount),
+    )
+  }
+
+  async multisigGetConfig?(): Promise<MultisigConfig> {
+    if (!this.wrappedAdapter.multisigGetConfig) {
+      throw new Error('multisigGetConfig not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('multisigGetConfig', () =>
+      this.wrappedAdapter.multisigGetConfig!(),
+    )
+  }
+
+  async multisigListProposals?(status?: MultisigProposalStatus): Promise<MultisigProposal[]> {
+    if (!this.wrappedAdapter.multisigListProposals) {
+      throw new Error('multisigListProposals not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('multisigListProposals', () =>
+      this.wrappedAdapter.multisigListProposals!(status),
+    )
+  }
+
+  async multisigGetProposal?(proposalId: number): Promise<MultisigProposal | null> {
+    if (!this.wrappedAdapter.multisigGetProposal) {
+      throw new Error('multisigGetProposal not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('multisigGetProposal', () =>
+      this.wrappedAdapter.multisigGetProposal!(proposalId),
+    )
+  }
+
+  async multisigPropose?(target: string, functionName: string, args: MultisigArg[]): Promise<{ txHash: string; proposalId?: number }> {
+    if (!this.wrappedAdapter.multisigPropose) {
+      throw new Error('multisigPropose not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('multisigPropose', () =>
+      this.wrappedAdapter.multisigPropose!(target, functionName, args),
+    )
+  }
+
+  async prepareMultisigCall?(call: MultisigCall, params: MultisigCallParams): Promise<string> {
+    if (!this.wrappedAdapter.prepareMultisigCall) {
+      throw new Error('prepareMultisigCall not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('prepareMultisigCall', () =>
+      this.wrappedAdapter.prepareMultisigCall!(call, params),
+    )
+  }
+
+  async submitMultisigCall?(signedXdr: string, call: MultisigCall, params: MultisigCallParams): Promise<string> {
+    if (!this.wrappedAdapter.submitMultisigCall) {
+      throw new Error('submitMultisigCall not supported by wrapped adapter')
+    }
+    return this.executeWithCircuitBreaker('submitMultisigCall', () =>
+      this.wrappedAdapter.submitMultisigCall!(signedXdr, call, params),
     )
   }
 }

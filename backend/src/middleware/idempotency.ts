@@ -3,8 +3,8 @@ import type { Request, Response, NextFunction } from 'express'
 import { ErrorCode } from '../errors/errorCodes.js'
 import type { ErrorResponse } from '../errors/errorCodes.js'
 
-const IDEMPOTENCY_DOCS_URL = 'https://docs.shelterflex.com/api/idempotency'
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+export const IDEMPOTENCY_DOCS_URL = 'https://docs.shelterflex.com/api/idempotency'
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /**
  * Cached response stored for idempotent requests.
@@ -109,6 +109,10 @@ const DEFAULT_DEDUP_WINDOW_MS = parseInt(process.env.IDEMPOTENCY_TTL_MS ?? Strin
 const defaultStore = new InMemoryIdempotencyStore(DEFAULT_DEDUP_WINDOW_MS)
 
 /**
+ * Process-local idempotency. Retries that reach another instance, or arrive
+ * after a restart, are processed again, so this must NOT guard routes that move
+ * money; use `durableApiIdempotency` (Postgres-backed) for those.
+ *
  * Middleware that enforces idempotency using the `Idempotency-Key` header.
  *
  * - If the key was seen before and the original response is cached, replay it.

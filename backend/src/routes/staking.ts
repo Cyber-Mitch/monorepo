@@ -6,7 +6,7 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { getPaymentProvider } from '../payments/index.js'
 import { validate } from '../middleware/validate.js'
-import { idempotency } from '../middleware/idempotency.js'
+import { durableApiIdempotency } from '../middleware/durableApiIdempotency.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { depositStore } from '../models/depositStore.js'
 import { LinkedAddressStore } from '../models/linkedAddressStore.js'
@@ -120,7 +120,7 @@ export function createStakingRouter(
 
   router.post(
     '/deposit/initiate',
-    idempotency(),
+    durableApiIdempotency(),
     validate(depositInitiateSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -213,7 +213,7 @@ export function createStakingRouter(
    */
   router.post(
     '/finalize',
-    idempotency(),
+    durableApiIdempotency(),
     validate(stakeFinalizeSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -255,7 +255,7 @@ export function createStakingRouter(
    */
   router.post(
     '/stake_from_deposit',
-    idempotency(),
+    durableApiIdempotency(),
     validate(stakeFromDepositSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -333,7 +333,7 @@ export function createStakingRouter(
    */
   router.post(
     '/stake',
-    idempotency(),
+    durableApiIdempotency(),
     validate(stakeSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -408,7 +408,7 @@ export function createStakingRouter(
   router.post(
     '/stake-ngn',
     authenticateToken,
-    idempotency(),
+    durableApiIdempotency(),
     validate(stakeNgnSchema),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
@@ -586,7 +586,7 @@ export function createStakingRouter(
    */
   router.post(
     '/unstake',
-    idempotency(),
+    durableApiIdempotency(),
     validate(unstakeSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -654,7 +654,7 @@ export function createStakingRouter(
    */
   router.post(
     '/claim',
-    idempotency(),
+    durableApiIdempotency(),
     validate(claimStakeRewardSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {

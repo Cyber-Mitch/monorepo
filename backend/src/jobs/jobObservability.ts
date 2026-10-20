@@ -76,6 +76,14 @@ export const JOB_INVENTORY: readonly JobInventoryEntry[] = [
     healthy: 'One run per day; non-zero only in the days before a pay cycle.',
   },
   {
+    name: 'epoch-seal',
+    module: 'src/jobs/epochSealJob.ts',
+    does: 'Seals the current epoch_rewards epoch as soon as it has ended (idempotent: never seals twice).',
+    expectedIntervalMs: 60_000,
+    ifItDoesNotRun: 'Epochs stay open past their end: stakers cannot claim that epoch and its reward pool stays frozen.',
+    healthy: 'Runs every 60s and records 0 processed almost always; 1 appears once per epoch, right after it ends.',
+  },
+  {
     name: 'scheduler',
     module: 'src/jobs/scheduler/worker.ts',
     does: 'Leases and executes due rows in the scheduled_jobs table (notifications, webhooks, purges).',
