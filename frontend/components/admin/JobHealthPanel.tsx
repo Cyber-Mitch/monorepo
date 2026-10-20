@@ -13,6 +13,7 @@ import { AlertTriangle, CheckCircle2, Clock, Timer, XCircle } from "lucide-react
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getToken } from "@/lib/auth";
 
 type JobState = "healthy" | "failing" | "overdue" | "never_ran";
 
@@ -50,7 +51,11 @@ interface JobHealthReport {
 const REFRESH_INTERVAL_MS = 15_000;
 
 async function fetchJobHealth(): Promise<JobHealthReport> {
-  const res = await fetch(`/api/admin/jobs/health`);
+  // The route checks this token and forwards it to the backend (#1935).
+  const token = await getToken();
+  const res = await fetch(`/api/admin/jobs/health`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (!res.ok) throw new Error(`Job health failed: ${res.status}`);
   return res.json();
 }
