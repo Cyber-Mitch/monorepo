@@ -28,6 +28,7 @@ describe('Admin Risk Routes', () => {
     sessionStore.clear()
 
     const adminUser = await userStore.getOrCreateByEmail('admin@test.com')
+    adminUser.role = 'admin' // no RBAC database in tests: requirePermission falls back to the legacy role
     const testToken = `test-token-${Date.now()}-${Math.random().toString(36).substring(7)}`
     const session = await sessionStore.create('admin@test.com', testToken)
     authToken = session.token
@@ -212,6 +213,65 @@ describe('Admin Risk Routes', () => {
           notes: 'Test',
         })
         .expect(500)
+    })
+  })
+
+  describe('authorization (#1933)', () => {
+    let tenantToken: string
+
+    beforeEach(async () => {
+      await userStore.getOrCreateByEmail('tenant@test.com') // default role: tenant
+      tenantToken = (await sessionStore.create('tenant@test.com', `tenant-${Date.now()}`)).token
+    })
+
+    const routes: Array<['get' | 'post', string]> = [
+      ['get', '/api/admin/risk/frozen-users'],
+      ['get', `/api/admin/risk/${'victim-user'}`],
+      ['post', '/api/admin/risk/victim-user/freeze'],
+      ['post', '/api/admin/risk/victim-user/unfreeze'],
+    ]
+
+    it.each(routes)('%s %s rejects a normal logged-in user with 403 and changes nothing', async (method, path) => {
+      const res = await request(app)[method](path)
+        .set('Authorization', `Bearer ${tenantToken}`)
+        .send({ reason: 'MANUAL', notes: 'attack' })
+
+      expect(res.status).toBe(403)
+      expect(await userRiskStateStore.getByUserId('victim-user')).toBeFalsy()
+    })
+
+    it.each(routes)('%s %s rejects an unauthenticated caller with 401', async (method, path) => {
+      await request(app)[method](path).send({}).expect(401)
+    })
+
+    it('does not let a normal user unfreeze an account frozen for fraud', async () => {
+      await userRiskStateStore.freeze('victim-user', 'COMPLIANCE', 'fraud review')
+
+      await request(app)
+        .post('/api/admin/risk/victim-user/unfreeze')
+        .set('Authorization', `Bearer ${tenantToken}`)
+        .send({ notes: 'me' })
+        .expect(403)
+
+      expect((await userRiskStateStore.getByUserId('victim-user'))?.isFrozen).toBe(true)
+    })
+
+    it('lets an admin freeze and unfreeze, and records that admin as the actor', async () => {
+      const spy = vi.spyOn(logger, 'info')
+
+      await request(app)
+        .post('/api/admin/risk/victim-user/freeze')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ reason: 'MANUAL', notes: 'review' })
+        .expect(200)
+      await request(app)
+        .post('/api/admin/risk/victim-user/unfreeze')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ notes: 'cleared' })
+        .expect(200)
+
+      const adminId = (await userStore.getByEmail('admin@test.com'))!.id
+      expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ adminId }))
     })
   })
 })

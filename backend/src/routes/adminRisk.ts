@@ -17,6 +17,7 @@ import {
   authenticateToken,
   type AuthenticatedRequest,
 } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { auditAdminRiskOperation } from "../utils/auditLogger.js";
 
 export function createAdminRiskRouter(
@@ -31,6 +32,7 @@ export function createAdminRiskRouter(
   router.get(
     "/frozen-users",
     authenticateToken,
+    requirePermission("risk", "view"),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         logger.info("Getting frozen users", {
@@ -71,6 +73,7 @@ export function createAdminRiskRouter(
   router.get(
     "/:userId",
     authenticateToken,
+    requirePermission("risk", "view"),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { userId } = req.params;
@@ -138,6 +141,7 @@ export function createAdminRiskRouter(
   router.post(
     "/:userId/freeze",
     authenticateToken,
+    requirePermission("risk", "manage"),
     validate(freezeUserRequestSchema, "body"),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
@@ -197,6 +201,7 @@ export function createAdminRiskRouter(
   router.post(
     "/:userId/unfreeze",
     authenticateToken,
+    requirePermission("risk", "manage"),
     validate(unfreezeUserRequestSchema, "body"),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {

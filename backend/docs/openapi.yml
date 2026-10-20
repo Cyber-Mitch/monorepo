@@ -606,282 +606,6 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
-  /api/epoch-rewards/stake:
-    post:
-      summary: Stake tokens in epoch rewards contract
-      description: Stake tokens to participate in epoch rewards program.
-      operationId: epochStake
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [amount]
-              properties:
-                amount:
-                  type: string
-                  description: Amount to stake as string (to handle large numbers)
-                  example: "1000000"
-      responses:
-        "200":
-          description: Stake submitted successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, txHash]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  txHash:
-                    type: string
-                    description: Stellar transaction hash
-                    example: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/epoch-rewards/unstake:
-    post:
-      summary: Unstake tokens from epoch rewards contract
-      description: Unstake previously staked tokens from epoch rewards program.
-      operationId: epochUnstake
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [amount]
-              properties:
-                amount:
-                  type: string
-                  description: Amount to unstake as string
-                  example: "500000"
-      responses:
-        "200":
-          description: Unstake submitted successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, txHash]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  txHash:
-                    type: string
-                    description: Stellar transaction hash
-                    example: "b4f3d2e5f6a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3"
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/epoch-rewards/claim:
-    post:
-      summary: Claim epoch rewards
-      description: Claim available rewards from the epoch rewards contract.
-      operationId: epochClaim
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Rewards claimed successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, claimedAmount]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  claimedAmount:
-                    type: string
-                    description: Amount claimed as string
-                    example: "1000"
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/epoch-rewards/claimable:
-    get:
-      summary: Get claimable rewards amount
-      description: Query the amount of rewards available to claim for the authenticated user.
-      operationId: epochGetClaimable
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Claimable amount retrieved successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, claimable]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  claimable:
-                    type: string
-                    description: Amount available to claim as string
-                    example: "500"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/epoch-rewards/epoch/{epochNumber}:
-    get:
-      summary: Get epoch information
-      description: Retrieve detailed information about a specific epoch.
-      operationId: epochGetEpoch
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: epochNumber
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 1
-          description: The epoch number to query
-      responses:
-        "200":
-          description: Epoch information retrieved successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, data]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  data:
-                    $ref: "#/components/schemas/EpochInfo"
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/Error"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/epoch-rewards/current-epoch:
-    get:
-      summary: Get current epoch number
-      description: Retrieve the current epoch number from the epoch rewards contract.
-      operationId: epochGetCurrentEpoch
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Current epoch number retrieved successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, currentEpoch]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  currentEpoch:
-                    type: integer
-                    description: Current epoch number
-                    example: 1
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/epoch-rewards/total-staked:
-    get:
-      summary: Get total staked amount
-      description: Retrieve the total amount of tokens staked in the epoch rewards contract.
-      operationId: epochGetTotalStaked
-      tags:
-        - Epoch Rewards
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Total staked amount retrieved successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, totalStaked]
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  totalStaked:
-                    type: string
-                    description: Total staked amount as string
-                    example: "1000000"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        default:
-          $ref: "#/components/responses/Error"
-
-  /api/property-issue-reports:
-    post:
-      summary: Submit a property issue report
-      description: Accepts and stores an issue report from the property detail report dialog.
-      operationId: createPropertyIssueReport
-      tags:
-        - Risk
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePropertyIssueReportRequest"
-      responses:
-        "201":
-          description: Report accepted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreatePropertyIssueReportResponse"
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        default:
-          $ref: "#/components/responses/Error"
-
   /soroban/config:
     get:
       summary: Get Soroban configuration
@@ -1184,6 +908,458 @@ paths:
           $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
+
+  /api/wallet/ngn/balance:
+    get:
+      summary: Get the NGN wallet balance
+      description: |
+        Available, held and total NGN for the caller, computed from the wallet ledger. Amounts are whole naira (numbers).
+      operationId: getNgnBalance
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NgnBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/wallet/ngn/ledger:
+    get:
+      summary: List NGN ledger entries
+      description: |
+        The caller's ledger entries, newest first. `amountNgn` is signed: reservations and debits are negative. `nextCursor` is currently always null: only the first `limit` entries are returned.
+      operationId: getNgnLedger
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NgnLedgerResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/wallet/ngn/withdraw/history:
+    get:
+      summary: List the caller's withdrawals
+      description: |
+        The caller's NGN withdrawals, newest first, with their status. Page with `limit` and `cursor`.
+      operationId: getNgnWithdrawalHistory
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Withdrawals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalHistoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/wallet/address:
+    get:
+      summary: Get the custodial wallet address
+      description: |
+        The Stellar address of the caller's custodial wallet. 403 when custodial mode is disabled; 401 when the caller has no wallet yet.
+      operationId: getWalletAddress
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Wallet address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletAddressResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/wallet/create:
+    post:
+      summary: Create the custodial wallet
+      description: |
+        Creates a custodial wallet for the caller if they do not have one and returns its address. 403 when custodial mode is disabled.
+      operationId: createWallet
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Wallet created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletAddressResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/wallet/sign-message:
+    post:
+      summary: Sign a message with the custodial wallet
+      description: |
+        Signs `message` with the caller's custodial key. 403 when custodial mode is disabled or signing is paused.
+      operationId: signWalletMessage
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletSignatureResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/wallet/sign-transaction:
+    post:
+      summary: Sign a Soroban transaction with the custodial wallet
+      description: |
+        Signs the transaction envelope `xdr` with the caller's custodial key. 403 when custodial mode is disabled or signing is paused.
+      operationId: signWalletTransaction
+      tags:
+        - Wallet
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [xdr]
+              properties:
+                xdr: { type: string, minLength: 1, description: Base64 transaction envelope }
+      responses:
+        '200':
+          description: Signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletSignatureResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/deposits/confirm:
+    post:
+      summary: Confirm a fiat deposit and convert it
+      description: |
+        Confirms an NGN deposit, idempotent by `depositId`, and converts it to USDC once. Returns the deposit and the conversion. The implementation does not authenticate the caller: it is meant to be reached by trusted services, so it should not be exposed publicly.
+      operationId: confirmDeposit
+      tags:
+        - Deposits
+      security: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A UUID. Retrying with the same key and body replays the first response; the same key with a different body is 409. The legacy `x-idempotency-key` header is also accepted.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [depositId, userId, amountNgn, provider, providerRef]
+              properties:
+                depositId: { type: string, description: 'Canonical deposit identifier: {provider}:{id}' }
+                userId: { type: string }
+                amountNgn: { type: number, exclusiveMinimum: 0 }
+                provider: { type: string, enum: [onramp, offramp, manual_admin] }
+                providerRef: { type: string, description: Provider reference for reconciliation }
+      responses:
+        '200':
+          description: Deposit confirmed and converted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  deposit: { type: object, additionalProperties: true }
+                  conversion: { type: object, additionalProperties: true }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/staking/finalize:
+    post:
+      summary: Finalize staking for a completed conversion
+      description: |
+        Writes the on-chain staking receipt for a completed conversion. Idempotent by `conversionId`. 200 when the receipt was written, 202 when it was queued for retry; 503 when the staking service is unavailable. The implementation does not authenticate the caller: it is meant for trusted services.
+      operationId: finalizeStaking
+      tags:
+        - Staking
+      security: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A UUID. Retrying with the same key and body replays the first response; the same key with a different body is 409. The legacy `x-idempotency-key` header is also accepted.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversionId]
+              properties:
+                conversionId: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Finalized and receipt written
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingOutboxResponse'
+        '202':
+          description: Finalized, receipt queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingOutboxResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/staking/stake_from_deposit:
+    post:
+      summary: Stake the USDC from a converted deposit
+      description: |
+        Stakes the USDC amount produced by a deposit conversion. The conversion must be completed (409 otherwise) and exist (404). Idempotent by deposit. 200 when the receipt was written, 202 when it was queued for retry. The implementation does not authenticate the caller: it is meant for trusted services.
+      operationId: stakeFromDeposit
+      tags:
+        - Staking
+      security: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A UUID. Retrying with the same key and body replays the first response; the same key with a different body is 409. The legacy `x-idempotency-key` header is also accepted.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversionId]
+              properties:
+                conversionId: { type: string, minLength: 1, description: Conversion id returned by deposit confirmation }
+      responses:
+        '200':
+          description: Staked and receipt written
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingOutboxResponse'
+        '202':
+          description: Staked, receipt queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingOutboxResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/staking/stake-ngn:
+    post:
+      summary: Stake directly from the NGN wallet
+      description: |
+        Reserves `amountNgn` in the caller's NGN wallet, converts it to USDC, debits the reservation and writes the staking receipt. Idempotent by `(externalRefSource, externalRef)`: repeating it returns 200 `Staking already processed` once the conversion completed, or 202 `Staking in progress`. 400 when the balance is too low or the amount is under 100 NGN.
+      operationId: stakeFromNgn
+      tags:
+        - Staking
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A UUID. Retrying with the same key and body replays the first response; the same key with a different body is 409. The legacy `x-idempotency-key` header is also accepted.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountNgn, externalRefSource, externalRef]
+              properties:
+                amountNgn: { type: number, minimum: 100 }
+                externalRefSource: { type: string, pattern: '^[a-zA-Z0-9_-]+$', description: 'Source identifier, e.g. web or mobile' }
+                externalRef: { type: string, minLength: 1, description: Reference for idempotency, e.g. a UUID }
+      responses:
+        '200':
+          description: Staked (or already processed)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+                  conversionId: { type: string }
+                  amountUsdc: { type: string }
+                  outboxId: { type: string }
+                  txId: { type: string }
+                  status: { type: string }
+        '202':
+          description: Staking in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+                  status: { type: string }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Error'
+
+
+  /api/staking/history:
+    get:
+      summary: List the caller's staking activity
+      description: |
+        Stake, unstake and reward-claim receipts for the caller's wallet, newest first (at most 100 sent and 100 received are considered). The wallet is taken from the `x-wallet-address` header, else the custodial wallet, else the linked wallet; 400 when none exists. Returns an empty list when no receipt index is available.
+      operationId: getStakingHistory
+      tags:
+        - Staking
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: x-wallet-address
+          in: header
+          required: false
+          description: Stellar address to read history for; defaults to the caller's wallet
+          schema: { type: string }
+      responses:
+        '200':
+          description: Staking history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        txId: { type: string }
+                        txType: { type: string }
+                        amountUsdc: { type: string }
+                        amountNgn: { type: string }
+                        fxRate: { type: string }
+                        indexedAt: { type: string, format: date-time }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+
 
   /api/wallet/ngn/withdraw/initiate:
     post:
@@ -3278,251 +3454,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MvpStakingPositionResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/position:
-    get:
-      summary: Get delegated-staking position
-      description: >-
-        The caller's position inside the stake_delegation contract: the balance
-        that contract holds for them, how much of it is currently delegated, how
-        much is free, and the per-delegatee breakdown. This is a separate ledger
-        from staking_pool — it is never a slice of /api/staking/position.
-      operationId: getDelegationPosition
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Delegated-staking position retrieved successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegationPositionResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/delegatee-earnings:
-    get:
-      summary: Get delegatee earnings
-      description: >-
-        Net rewards claimable by the caller acting as a delegatee (gross minus
-        their commission), plus the accrued commission balance itself.
-      operationId: getDelegateeEarnings
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Delegatee earnings retrieved successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegateeEarningsResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/delegate:
-    post:
-      summary: Delegate stake to a delegatee
-      description: Routes part of the caller's free stake_delegation balance to a delegatee.
-      operationId: delegateStake
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DelegateRequest'
-      responses:
-        '200':
-          description: Stake delegated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegationTxResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/undelegate/request:
-    post:
-      summary: Request undelegation
-      description: >-
-        Opens the contract's undelegation cooldown. The stake stays delegated
-        until the matching complete call succeeds.
-      operationId: requestUndelegate
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DelegateRequest'
-      responses:
-        '202':
-          description: Undelegation requested; cooldown started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegationTxResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/undelegate/complete:
-    post:
-      summary: Complete a pending undelegation
-      description: >-
-        Settles a pending undelegation. The contract rejects this until its
-        configured cooldown (7 days by default) has elapsed.
-      operationId: completeUndelegate
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [delegatee]
-              properties:
-                delegatee:
-                  type: string
-                  description: Delegatee whose pending undelegation should be settled
-                  example: GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H
-      responses:
-        '200':
-          description: Undelegation completed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegationTxResponse'
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/commission:
-    post:
-      summary: Set the caller's delegatee commission
-      description: Sets the commission, in basis points, charged on stake delegated to the caller.
-      operationId: setDelegateeCommission
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [rateBps]
-              properties:
-                rateBps:
-                  type: integer
-                  minimum: 0
-                  maximum: 10000
-                  description: Commission in basis points
-                  example: 1000
-      responses:
-        '200':
-          description: Commission updated
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success, txHash, rateBps]
-                properties:
-                  success: { type: boolean, example: true }
-                  txHash: { type: string }
-                  rateBps: { type: integer, example: 1000 }
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/claim-rewards:
-    post:
-      summary: Claim delegatee rewards
-      description: Claims the caller's net delegatee rewards (gross minus their commission).
-      operationId: claimDelegateeRewards
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Delegatee rewards claimed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegationTxResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '503':
-          $ref: '#/components/responses/Error'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/staking/delegation/claim-commission:
-    post:
-      summary: Claim delegatee commission
-      description: Claims the caller's accrued commission balance.
-      operationId: claimDelegateeCommission
-      tags:
-        - Staking
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Commission claimed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegationTxResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '503':
@@ -7256,7 +7187,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/epoch-rewards/epochs/{n}:
     get:
       summary: Get one epoch
@@ -7291,7 +7221,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/epoch-rewards/stake/prepare:
     post:
@@ -7332,7 +7261,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/epoch-rewards/stake/submit:
     post:
@@ -7376,7 +7304,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/epoch-rewards/unstake/prepare:
     post:
       summary: Prepare an unsigned unstake transaction
@@ -7416,7 +7343,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/epoch-rewards/unstake/submit:
     post:
@@ -7460,7 +7386,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/epoch-rewards/claim/prepare:
     post:
       summary: Prepare an unsigned claim transaction
@@ -7490,7 +7415,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/epoch-rewards/claim/submit:
     post:
@@ -7530,7 +7454,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/admin/epoch-rewards/fund:
     post:
@@ -7575,7 +7498,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/admin/epoch-rewards/seal:
     post:
@@ -7623,7 +7545,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/admin/multisig/config:
     get:
       summary: Get the multisig signers and threshold
@@ -7656,7 +7577,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/admin/multisig:
     get:
@@ -7709,7 +7629,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/admin/multisig/{id}:
     get:
       summary: Get a multisig proposal
@@ -7747,7 +7666,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/admin/multisig/propose/prepare:
     post:
@@ -7796,7 +7714,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/admin/multisig/{id}/approve/prepare:
     post:
       summary: Prepare an unsigned approve
@@ -7838,7 +7755,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/admin/multisig/{id}/revoke/prepare:
     post:
@@ -7882,7 +7798,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-
   /api/v1/admin/multisig/{id}/execute/prepare:
     post:
       summary: Prepare an unsigned execute
@@ -7924,7 +7839,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/admin/multisig/submit:
     post:
@@ -7984,7 +7898,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         default:
           $ref: '#/components/responses/Error'
-
 
   /api/v1/tenant/data-export:
     post:
@@ -9706,38 +9619,6 @@ components:
           additionalProperties:
             type: integer
 
-    CreatePropertyIssueReportRequest:
-      type: object
-      required:
-        - propertyId
-        - reportCategory
-        - reportDetails
-      properties:
-        propertyId:
-          type: string
-          minLength: 1
-        reportCategory:
-          type: string
-          minLength: 1
-          maxLength: 64
-          description: Category selected in the dialog (frontend field name).
-        reportDetails:
-          type: string
-          minLength: 1
-          maxLength: 2000
-          description: Free-text details entered in the dialog (frontend field name).
-
-    CreatePropertyIssueReportResponse:
-      type: object
-      required: [success, reportId]
-      properties:
-        success:
-          type: boolean
-          example: true
-        reportId:
-          type: string
-          format: uuid
-
     BankAccountDetails:
       type: object
       required:
@@ -9753,6 +9634,56 @@ components:
           type: string
         bankName:
           type: string
+
+    NgnBalanceResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        availableNgn: { type: number }
+        heldNgn: { type: number }
+        totalNgn: { type: number }
+
+    NgnLedgerResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              entryId: { type: string }
+              walletId: { type: string }
+              type:
+                type: string
+                enum: [TOPUP_PENDING, TOPUP_CONFIRMED, TOPUP_REVERSED, STAKE_RESERVE, STAKE_RELEASE, CONVERSION_DEBIT, WITHDRAWAL_PENDING, WITHDRAWAL_CONFIRMED, WITHDRAWAL_FAILED, ADJUSTMENT]
+              amountNgn: { type: number, description: Signed }
+              referenceType: { type: string }
+              referenceId: { type: string }
+              createdAt: { type: string, format: date-time }
+        nextCursor: { type: string, nullable: true }
+
+    WalletAddressResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        address: { type: string }
+
+    WalletSignatureResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        signature: { type: string }
+        publicKey: { type: string }
+
+    StakingOutboxResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        outboxId: { type: string }
+        txId: { type: string, nullable: true }
+        status: { type: string }
+        message: { type: string }
 
     WithdrawalRequest:
       type: object
@@ -10435,66 +10366,6 @@ components:
           description: Optional FX rate provider
           example: coinbase
 
-    EpochInfo:
-      type: object
-      description: Information about a specific epoch in the epoch rewards contract
-      required:
-        - epoch_number
-        - start_ts
-        - duration_secs
-        - end_ts
-        - seal_ts
-        - sealed
-        - total_rewards
-        - carried_forward
-        - reward_index_at_seal
-        - dust
-        - total_claimable_at_seal
-      properties:
-        epoch_number:
-          type: integer
-          description: The epoch number
-          example: 1
-        start_ts:
-          type: integer
-          description: Unix timestamp when the epoch started
-          example: 1000
-        duration_secs:
-          type: integer
-          description: Duration of the epoch in seconds
-          example: 86400
-        end_ts:
-          type: integer
-          description: Unix timestamp when the epoch ends
-          example: 87400
-        seal_ts:
-          type: integer
-          description: Unix timestamp when the epoch was sealed
-          example: 87400
-        sealed:
-          type: boolean
-          description: Whether the epoch has been sealed
-          example: true
-        total_rewards:
-          type: string
-          description: Total rewards added to the epoch as string
-          example: "10000"
-        carried_forward:
-          type: string
-          description: Amount carried forward from previous epoch as string
-          example: "0"
-        reward_index_at_seal:
-          type: string
-          description: Reward index at the time of sealing as string
-          example: "1000"
-        dust:
-          type: string
-          description: Dust amount as string
-          example: "0"
-        total_claimable_at_seal:
-          type: string
-          description: Total claimable amount at seal as string
-          example: "5000"
     EarningsResponse:
       type: object
       required:
@@ -10923,75 +10794,6 @@ components:
             unused: { type: string, description: Stake still available to unstake, example: "750.000000" }
             claimable: { type: string, example: "50.250000" }
 
-    DelegationPositionResponse:
-      type: object
-      required: [success, position]
-      properties:
-        success:
-          type: boolean
-          example: true
-        position:
-          type: object
-          required: [staked, delegated, free, currentEpoch, delegations]
-          properties:
-            staked:
-              type: string
-              description: Balance held by stake_delegation for the caller (NOT the staking_pool position)
-              example: "1000.000000"
-            delegated: { type: string, description: Portion currently routed to delegatees, example: "250.000000" }
-            free: { type: string, description: Portion still available to delegate or unstake, example: "750.000000" }
-            currentEpoch: { type: integer, description: stake_delegation's current epoch number, example: 4 }
-            delegations:
-              type: array
-              items:
-                type: object
-                required: [delegatee, amountUsdc, activatedEpoch]
-                properties:
-                  delegatee: { type: string, example: GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H }
-                  amountUsdc: { type: string, example: "250.000000" }
-                  activatedEpoch: { type: integer, example: 2 }
-
-    DelegateeEarningsResponse:
-      type: object
-      required: [success, delegatee, earnings]
-      properties:
-        success: { type: boolean, example: true }
-        delegatee: { type: string, example: GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H }
-        earnings:
-          type: object
-          required: [claimable, commissionClaimable]
-          properties:
-            claimable: { type: string, description: Net rewards after the commission split, example: "45.000000" }
-            commissionClaimable: { type: string, description: Accrued commission balance, example: "5.000000" }
-
-    DelegateRequest:
-      type: object
-      required: [delegatee, amountUsdc]
-      properties:
-        delegatee:
-          type: string
-          pattern: '^G[A-Z2-7]{55}$'
-          description: Stellar address of the delegatee
-          example: GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H
-        amountUsdc:
-          type: string
-          pattern: '^\d+(\.\d{1,6})?$'
-          description: Amount in USDC (canonical unit)
-          example: "250.000000"
-
-    DelegationTxResponse:
-      type: object
-      required: [success, txHash]
-      properties:
-        success: { type: boolean, example: true }
-        txHash: { type: string, description: Stellar transaction hash for the submitted contract call }
-        message: { type: string, example: Stake delegated }
-        delegation:
-          type: object
-          properties:
-            delegatee: { type: string }
-            amountUsdc: { type: string }
-
     ActiveSession:
       type: object
       required:
@@ -11416,6 +11218,10 @@ tags:
     description: Deal management and repayment schedule operations
   - name: Admin
     description: Administrative operations including reward payouts
+  - name: Wallet
+    description: NGN wallet balance, ledger and withdrawals, and the custodial Stellar wallet
+  - name: Deposits
+    description: Fiat deposit confirmation and conversion
   - name: Staking
     description: Staking operations (stake, unstake, claim rewards)
   - name: Support

@@ -97,6 +97,24 @@ All API endpoints are now versioned under `/api/v1/`. The current version is `v1
 | `POST` | `/api/v1/example/echo` | Example endpoint demonstrating Zod validation |
 | `POST` | `/soroban/simulate` | Validates and queues a Soroban contract simulation |
 
+### OpenAPI drift guard
+
+`npm run openapi:validate` only checks that `docs/openapi.yml` is valid. `src/docs/openapiCoverage.test.ts`
+(part of `npm run test:ci`) checks that it is complete: it walks the real Express app, collects every
+mounted `/api` route and compares `METHOD /path` with the spec (path parameters are compared as `{}`,
+and `/api/v1` is read as `/api`, since the spec documents both).
+
+- **Add a route:** document it in `docs/openapi.yml` in the same PR. A mounted route that the spec does
+  not describe fails the test and lists the missing `METHOD /path`.
+- **Remove a route:** remove its operation from the spec. A documented operation with no mounted route
+  fails as dead documentation.
+- **Allow-list:** `src/docs/openapiCoverage.allowlist.json` holds the routes that were undocumented
+  when the guard was added. It may only shrink: when you document one of them, delete its line (the
+  test fails if an entry is now documented or no longer exists), and lower `ALLOWLIST_CEILING` in the
+  test. Never add a new route to it.
+- Routes that are only mounted behind a feature flag or in non-test environments are not seen by the
+  test. Routes mounted outside `/api/` (such as `/health`) are not checked.
+
 ### API Versioning
 
 The API uses URL path versioning with the `/api/v1/` prefix. Requests to the unversioned `/api/*` paths are automatically redirected to `/api/v1/*` with deprecation headers.

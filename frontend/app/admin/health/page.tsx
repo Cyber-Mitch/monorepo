@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import BackendHealthCompact from "@/components/BackendHealthCompact";
 import JobHealthPanel from "@/components/admin/JobHealthPanel";
 import { apiGet } from "@/lib/apiClient";
+import { getToken } from "@/lib/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -101,8 +102,14 @@ type PanelState<T> =
 
 // ── Mock fetch helpers (replace with real apiFetch calls) ─────────────────────
 
+/** Sends the signed-in admin's own token: the /api/admin routes check it and forward it to the backend. */
+async function adminFetch(url: string): Promise<Response> {
+  const token = await getToken();
+  return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+}
+
 async function fetchHealthSnapshot(): Promise<HealthSnapshot> {
-  const res = await fetch(`/api/admin/health-snapshot`);
+  const res = await adminFetch(`/api/admin/health-snapshot`);
   if (!res.ok) throw new Error(`Health snapshot failed: ${res.status}`);
   return res.json();
 }
@@ -118,7 +125,7 @@ async function fetchAlerts(params: {
   if (params.status)   q.set("status",   params.status);
   if (params.cursor)   q.set("cursor",   params.cursor);
   q.set("limit", String(params.limit ?? 20));
-  const res = await fetch(`/api/admin/alerts?${q}`);
+  const res = await adminFetch(`/api/admin/alerts?${q}`);
   if (!res.ok) throw new Error(`Alerts failed: ${res.status}`);
   return res.json();
 }
