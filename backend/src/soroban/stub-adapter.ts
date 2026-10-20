@@ -15,21 +15,35 @@ import {
      OnChainReceipt,
      CreateVestingScheduleParams,
      VestingScheduleRecord,
+     EpochRewardsCall,
+     EpochRewardsEpoch,
+     MultisigArg,
+     MultisigCall,
+     MultisigCallParams,
+     MultisigConfig,
+     MultisigProposal,
+     MultisigProposalStatus,
 } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
 import { logger } from '../utils/logger.js'
-import { Account, TransactionBuilder } from '@stellar/stellar-sdk'
+import { Account, Keypair, TransactionBuilder, nativeToScVal, Address, xdr } from '@stellar/stellar-sdk'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { assertVestingClaimXdr, buildVestingClaimOperation } from './vestingClaim.js'
 import { vestedAmount } from './vestingMath.js'
+import { assertSignedInvocation, buildInvokeOperation } from './userSignedTx.js'
+import { encodeMultisigArg } from './multisigArgs.js'
+import { StubEpochRewards } from './stub-epoch-rewards.js'
+import { StubMultisig } from './stub-multisig.js'
 
 export class StubSorobanAdapter implements SorobanAdapter {
      private static stubBalances = new Map<string, bigint>()
      private static stubBonds = new Map<string, bigint>()
      private static stubReputations = new Map<string, TenantReputationRecord>()
      private static stubVestings = new Map<string, VestingScheduleRecord>()
+     private static stubEpochRewards = new StubEpochRewards()
+     private static stubMultisig = new StubMultisig()
      private config: SorobanConfig
 
      constructor(config: SorobanConfig) {
@@ -49,6 +63,8 @@ export class StubSorobanAdapter implements SorobanAdapter {
           this.stubBonds.clear()
           this.stubReputations.clear()
           this.stubVestings.clear()
+          this.stubEpochRewards = new StubEpochRewards()
+          this.stubMultisig = new StubMultisig()
           logger.debug('Soroban stub: static reset complete (balances, bonds, reputations and vestings cleared)')
      }
 
@@ -516,6 +532,221 @@ async requestRentRelease(params: RequestRentReleaseParams): Promise<void> {
                claimedAmount: record.claimedAmount + claimable,
           })
           return `stub_tx_hash_claim_vesting_${beneficiary}`
+     }
+
+     // epoch_rewards contract (#1965), in memory.
+     async epochRewardsCurrentEpoch(): Promise<number> {
+          this.requireEpochRewardsId()
+          return StubSorobanAdapter.stubEpochRewards.currentEpoch()
+     }
+
+     async epochRewardsGetEpoch(epochNumber: number): Promise<EpochRewardsEpoch | null> {
+          this.requireEpochRewardsId()
+          return StubSorobanAdapter.stubEpochRewards.getEpoch(epochNumber)
+     }
+
+     async epochRewardsTotalStaked(): Promise<bigint> {
+          this.requireEpochRewardsId()
+          return StubSorobanAdapter.stubEpochRewards.totalStaked()
+     }
+
+     async epochRewardsGetClaimable(user: string): Promise<bigint> {
+          this.requireEpochRewardsId()
+          return StubSorobanAdapter.stubEpochRewards.claimable(user)
+     }
+
+     async epochRewardsGetStake(user: string): Promise<bigint | null> {
+          this.requireEpochRewardsId()
+          return StubSorobanAdapter.stubEpochRewards.getStake(user)
+     }
+
+     async epochRewardsFund(amount: bigint): Promise<string> {
+          this.requireEpochRewardsId()
+          StubSorobanAdapter.stubEpochRewards.fund(amount)
+          return `stub_tx_hash_epoch_fund_${amount}`
+     }
+
+     async epochRewardsSeal(targetEpoch: number, nextEpochDurationSecs: number): Promise<string> {
+          this.requireEpochRewardsId()
+          StubSorobanAdapter.stubEpochRewards.seal(targetEpoch, nextEpochDurationSecs)
+          return `stub_tx_hash_epoch_seal_${targetEpoch}`
+     }
+
+     private epochRewardsArgs(call: EpochRewardsCall, user: string, amount?: bigint): xdr.ScVal[] {
+          const userArg = nativeToScVal(new Address(user))
+          if (call === 'claim') return [userArg]
+          if (amount === undefined || amount <= 0n) {
+               throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Amount must be positive')
+          }
+          return [userArg, nativeToScVal(amount, { type: 'i128' })]
+     }
+
+     async prepareEpochRewardsCall(call: EpochRewardsCall, user: string, amount?: bigint): Promise<string> {
+          const contractId = this.requireEpochRewardsId()
+          return this.buildUnsigned(contractId, user, call, this.epochRewardsArgs(call, user, amount))
+     }
+
+     async submitEpochRewardsCall(
+          signedXdr: string,
+          call: EpochRewardsCall,
+          user: string,
+          amount?: bigint,
+     ): Promise<string> {
+          const contractId = this.requireEpochRewardsId()
+          assertSignedInvocation(signedXdr, {
+               contractId,
+               functionName: call,
+               args: this.epochRewardsArgs(call, user, amount),
+               signer: user,
+               networkPassphrase: this.config.networkPassphrase,
+               label: `epoch rewards ${call}`,
+          })
+          const book = StubSorobanAdapter.stubEpochRewards
+          if (call === 'stake') book.stake(user, amount!)
+          else if (call === 'unstake') book.unstake(user, amount!)
+          else book.claim(user)
+          return `stub_tx_hash_epoch_${call}_${user}`
+     }
+
+     // multisig_admin contract (#1972), in memory.
+     multisigEnabled(): boolean {
+          return !!this.config.multisigAdminId
+     }
+
+     multisigContractId(): string | undefined {
+          return this.config.multisigAdminId
+     }
+
+     /** The stub's platform key: the configured admin secret's account, or a fixed test key. */
+     private stubAdminAddress(): string {
+          return this.config.adminSecret
+               ? Keypair.fromSecret(this.config.adminSecret).publicKey()
+               : Keypair.fromRawEd25519Seed(Buffer.alloc(32, 7)).publicKey()
+     }
+
+     /** Test helper: restarts the epoch_rewards stub with epochs of `durationSecs`. */
+     public static _testOnlyConfigureEpochs(durationSecs: number): void {
+          this.stubEpochRewards = new StubEpochRewards(durationSecs)
+     }
+
+     /** Test helper: sets the multisig's signers and threshold. */
+     public static _testOnlyConfigureMultisig(config: MultisigConfig): void {
+          this.stubMultisig.configure(config)
+     }
+
+     /** Test helper: the calls proposals have executed so far. */
+     public static _testOnlyExecutedMultisigCalls() {
+          return [...this.stubMultisig.executedCalls]
+     }
+
+     async multisigGetConfig(): Promise<MultisigConfig> {
+          this.requireMultisigId()
+          return StubSorobanAdapter.stubMultisig.getConfig()
+     }
+
+     async multisigListProposals(status?: MultisigProposalStatus): Promise<MultisigProposal[]> {
+          this.requireMultisigId()
+          return StubSorobanAdapter.stubMultisig.list(status)
+     }
+
+     async multisigGetProposal(proposalId: number): Promise<MultisigProposal | null> {
+          this.requireMultisigId()
+          return StubSorobanAdapter.stubMultisig.get(proposalId)
+     }
+
+     async multisigPropose(
+          target: string,
+          functionName: string,
+          args: MultisigArg[],
+     ): Promise<{ txHash: string; proposalId?: number }> {
+          this.requireMultisigId()
+          const proposalId = StubSorobanAdapter.stubMultisig.propose(
+               this.stubAdminAddress(),
+               target,
+               functionName,
+               args,
+          )
+          return { txHash: `stub_tx_hash_multisig_propose_${proposalId}`, proposalId }
+     }
+
+     private multisigArgs(call: MultisigCall, params: MultisigCallParams): xdr.ScVal[] {
+          const signer = nativeToScVal(new Address(params.signer))
+          if (call === 'propose') {
+               if (!params.target || !params.functionName) {
+                    throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'propose needs a target and function')
+               }
+               return [
+                    signer,
+                    nativeToScVal(new Address(params.target)),
+                    nativeToScVal(params.functionName, { type: 'symbol' }),
+                    xdr.ScVal.scvVec((params.args ?? []).map(encodeMultisigArg)),
+               ]
+          }
+          if (params.proposalId === undefined) {
+               throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `${call} needs a proposal id`)
+          }
+          return [signer, nativeToScVal(BigInt(params.proposalId), { type: 'u64' })]
+     }
+
+     async prepareMultisigCall(call: MultisigCall, params: MultisigCallParams): Promise<string> {
+          const contractId = this.requireMultisigId()
+          return this.buildUnsigned(contractId, params.signer, call, this.multisigArgs(call, params))
+     }
+
+     async submitMultisigCall(
+          signedXdr: string,
+          call: MultisigCall,
+          params: MultisigCallParams,
+     ): Promise<string> {
+          const contractId = this.requireMultisigId()
+          assertSignedInvocation(signedXdr, {
+               contractId,
+               functionName: call,
+               args: this.multisigArgs(call, params),
+               signer: params.signer,
+               networkPassphrase: this.config.networkPassphrase,
+               label: `multisig ${call}`,
+          })
+          const book = StubSorobanAdapter.stubMultisig
+          let suffix = ''
+          if (call === 'propose') {
+               suffix = String(book.propose(params.signer, params.target!, params.functionName!, params.args ?? []))
+          } else if (call === 'approve') {
+               book.approve(params.signer, params.proposalId!)
+               suffix = String(params.proposalId)
+          } else if (call === 'revoke_approval') {
+               book.revokeApproval(params.signer, params.proposalId!)
+               suffix = String(params.proposalId)
+          } else {
+               book.execute(params.signer, params.proposalId!)
+               suffix = String(params.proposalId)
+          }
+          return `stub_tx_hash_multisig_${call}_${suffix}`
+     }
+
+     private buildUnsigned(contractId: string, signer: string, fn: string, args: xdr.ScVal[]): string {
+          return new TransactionBuilder(new Account(signer, '0'), {
+               fee: '100',
+               networkPassphrase: this.config.networkPassphrase,
+          })
+               .addOperation(buildInvokeOperation(contractId, fn, args))
+               .setTimeout(300)
+               .build()
+               .toXDR()
+     }
+
+     private requireEpochRewardsId(): string {
+          if (!this.config.epochRewardsId) {
+               throw new Error('SOROBAN_EPOCH_REWARDS_ID not configured')
+          }
+          return this.config.epochRewardsId
+     }
+
+     private requireMultisigId(): string {
+          if (!this.config.multisigAdminId) {
+               throw new Error('MULTISIG_ADMIN_ID not configured')
+          }
+          return this.config.multisigAdminId
      }
 
      private requireVestingContractId(): string {

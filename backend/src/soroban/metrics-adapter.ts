@@ -11,6 +11,14 @@ import {
   OraclePriceReading,
   CreateVestingScheduleParams,
   VestingScheduleRecord,
+  EpochRewardsCall,
+  EpochRewardsEpoch,
+  MultisigArg,
+  MultisigCall,
+  MultisigCallParams,
+  MultisigConfig,
+  MultisigProposal,
+  MultisigProposalStatus,
 } from './adapter.js';
 import { SorobanConfig } from './client.js';
 import { RawReceiptEvent } from '../indexer/event-parser.js';
@@ -216,6 +224,120 @@ export class MetricsSorobanAdapter implements SorobanAdapter {
       throw new Error('submitVestingClaim not implemented');
     }
     return this.trackCall('submitVestingClaim', () => this.wrapped.submitVestingClaim!(signedXdr, beneficiary));
+  }
+
+  // epoch_rewards (#1965) and multisig_admin (#1972)
+  multisigEnabled?(): boolean {
+    return this.wrapped.multisigEnabled?.() ?? false;
+  }
+
+  multisigContractId?(): string | undefined {
+    return this.wrapped.multisigContractId?.();
+  }
+
+  async epochRewardsCurrentEpoch?(): Promise<number> {
+    if (!this.wrapped.epochRewardsCurrentEpoch) {
+      throw new Error('epochRewardsCurrentEpoch not implemented');
+    }
+    return this.trackCall('epochRewardsCurrentEpoch', () => this.wrapped.epochRewardsCurrentEpoch!());
+  }
+
+  async epochRewardsGetEpoch?(epochNumber: number): Promise<EpochRewardsEpoch | null> {
+    if (!this.wrapped.epochRewardsGetEpoch) {
+      throw new Error('epochRewardsGetEpoch not implemented');
+    }
+    return this.trackCall('epochRewardsGetEpoch', () => this.wrapped.epochRewardsGetEpoch!(epochNumber));
+  }
+
+  async epochRewardsTotalStaked?(): Promise<bigint> {
+    if (!this.wrapped.epochRewardsTotalStaked) {
+      throw new Error('epochRewardsTotalStaked not implemented');
+    }
+    return this.trackCall('epochRewardsTotalStaked', () => this.wrapped.epochRewardsTotalStaked!());
+  }
+
+  async epochRewardsGetClaimable?(user: string): Promise<bigint> {
+    if (!this.wrapped.epochRewardsGetClaimable) {
+      throw new Error('epochRewardsGetClaimable not implemented');
+    }
+    return this.trackCall('epochRewardsGetClaimable', () => this.wrapped.epochRewardsGetClaimable!(user));
+  }
+
+  async epochRewardsGetStake?(user: string): Promise<bigint | null> {
+    if (!this.wrapped.epochRewardsGetStake) {
+      throw new Error('epochRewardsGetStake not implemented');
+    }
+    return this.trackCall('epochRewardsGetStake', () => this.wrapped.epochRewardsGetStake!(user));
+  }
+
+  async epochRewardsFund?(amount: bigint): Promise<string> {
+    if (!this.wrapped.epochRewardsFund) {
+      throw new Error('epochRewardsFund not implemented');
+    }
+    return this.trackCall('epochRewardsFund', () => this.wrapped.epochRewardsFund!(amount));
+  }
+
+  async epochRewardsSeal?(targetEpoch: number, nextEpochDurationSecs: number): Promise<string> {
+    if (!this.wrapped.epochRewardsSeal) {
+      throw new Error('epochRewardsSeal not implemented');
+    }
+    return this.trackCall('epochRewardsSeal', () => this.wrapped.epochRewardsSeal!(targetEpoch, nextEpochDurationSecs));
+  }
+
+  async prepareEpochRewardsCall?(call: EpochRewardsCall, user: string, amount?: bigint): Promise<string> {
+    if (!this.wrapped.prepareEpochRewardsCall) {
+      throw new Error('prepareEpochRewardsCall not implemented');
+    }
+    return this.trackCall('prepareEpochRewardsCall', () => this.wrapped.prepareEpochRewardsCall!(call, user, amount));
+  }
+
+  async submitEpochRewardsCall?(signedXdr: string, call: EpochRewardsCall, user: string, amount?: bigint): Promise<string> {
+    if (!this.wrapped.submitEpochRewardsCall) {
+      throw new Error('submitEpochRewardsCall not implemented');
+    }
+    return this.trackCall('submitEpochRewardsCall', () => this.wrapped.submitEpochRewardsCall!(signedXdr, call, user, amount));
+  }
+
+  async multisigGetConfig?(): Promise<MultisigConfig> {
+    if (!this.wrapped.multisigGetConfig) {
+      throw new Error('multisigGetConfig not implemented');
+    }
+    return this.trackCall('multisigGetConfig', () => this.wrapped.multisigGetConfig!());
+  }
+
+  async multisigListProposals?(status?: MultisigProposalStatus): Promise<MultisigProposal[]> {
+    if (!this.wrapped.multisigListProposals) {
+      throw new Error('multisigListProposals not implemented');
+    }
+    return this.trackCall('multisigListProposals', () => this.wrapped.multisigListProposals!(status));
+  }
+
+  async multisigGetProposal?(proposalId: number): Promise<MultisigProposal | null> {
+    if (!this.wrapped.multisigGetProposal) {
+      throw new Error('multisigGetProposal not implemented');
+    }
+    return this.trackCall('multisigGetProposal', () => this.wrapped.multisigGetProposal!(proposalId));
+  }
+
+  async multisigPropose?(target: string, functionName: string, args: MultisigArg[]): Promise<{ txHash: string; proposalId?: number }> {
+    if (!this.wrapped.multisigPropose) {
+      throw new Error('multisigPropose not implemented');
+    }
+    return this.trackCall('multisigPropose', () => this.wrapped.multisigPropose!(target, functionName, args));
+  }
+
+  async prepareMultisigCall?(call: MultisigCall, params: MultisigCallParams): Promise<string> {
+    if (!this.wrapped.prepareMultisigCall) {
+      throw new Error('prepareMultisigCall not implemented');
+    }
+    return this.trackCall('prepareMultisigCall', () => this.wrapped.prepareMultisigCall!(call, params));
+  }
+
+  async submitMultisigCall?(signedXdr: string, call: MultisigCall, params: MultisigCallParams): Promise<string> {
+    if (!this.wrapped.submitMultisigCall) {
+      throw new Error('submitMultisigCall not implemented');
+    }
+    return this.trackCall('submitMultisigCall', () => this.wrapped.submitMultisigCall!(signedXdr, call, params));
   }
 
   /**

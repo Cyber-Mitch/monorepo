@@ -28,8 +28,18 @@ import {
   TenantReputationRecord,
   CreateVestingScheduleParams,
   VestingScheduleRecord,
+  EpochRewardsCall,
+  EpochRewardsEpoch,
+  MultisigArg,
+  MultisigCall,
+  MultisigCallParams,
+  MultisigConfig,
+  MultisigProposal,
+  MultisigProposalStatus,
 } from './adapter.js'
 import { assertVestingClaimXdr, buildVestingClaimOperation } from './vestingClaim.js'
+import { assertSignedInvocation, buildInvokeOperation } from './userSignedTx.js'
+import { decodeProposalArgs, encodeMultisigArg } from './multisigArgs.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
 import { logger } from '../utils/logger.js'
@@ -3216,6 +3226,412 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
     logger.info('Vesting claim submitted', { beneficiary, txHash: response.hash })
     return response.hash
+  }
+
+  // ── user-signed calls (shared by epoch_rewards and multisig_admin) ───────────
+
+  /**
+   * Build an unsigned, simulated transaction for `signer` to sign: one call to
+   * `functionName` on `contractId`. Soroban sets the fee and footprint.
+   */
+  private async prepareUserInvocation(
+    contractId: string,
+    signer: string,
+    functionName: string,
+    args: xdr.ScVal[],
+  ): Promise<string> {
+    let account: Account
+    try {
+      account = await this.server.getAccount(signer)
+    } catch (err) {
+      throw new ContractError(`Could not load account ${signer}`, contractId, functionName, err)
+    }
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.config.networkPassphrase,
+    })
+      .addOperation(buildInvokeOperation(contractId, functionName, args))
+      .setTimeout(300)
+      .build()
+
+    try {
+      const prepared = await this.server.prepareTransaction(tx)
+      return prepared.toXDR()
+    } catch (err) {
+      throw new ContractError(
+        `Failed to prepare ${functionName} for ${signer}`,
+        contractId,
+        functionName,
+        err,
+      )
+    }
+  }
+
+  /** Broadcast a transaction that `assertSignedInvocation` has already accepted. */
+  private async broadcastSigned(
+    tx: Parameters<rpc.Server['sendTransaction']>[0],
+    functionName: string,
+  ): Promise<string> {
+    const response = await this.withBackoff(() => this.server.sendTransaction(tx), {
+      op: 'sendTransaction',
+    })
+    if (response.status !== 'PENDING') {
+      throw new TransactionError(
+        `${functionName} rejected with status ${response.status}`,
+        response.hash,
+        functionName,
+      )
+    }
+    return response.hash
+  }
+
+  // ── epoch_rewards contract (#1965) ──────────────────────────────────────────
+
+  private getEpochRewardsId(): string {
+    if (!this.config.epochRewardsId) {
+      throw new ConfigurationError('SOROBAN_EPOCH_REWARDS_ID not configured')
+    }
+    return this.config.epochRewardsId
+  }
+
+  async epochRewardsCurrentEpoch(): Promise<number> {
+    const contractId = this.getEpochRewardsId()
+    try {
+      return Number(scValToNative(await this.invokeReadOnly(contractId, 'current_epoch', [])))
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to read current epoch', contractId, 'current_epoch', err)
+    }
+  }
+
+  async epochRewardsGetEpoch(epochNumber: number): Promise<EpochRewardsEpoch | null> {
+    const contractId = this.getEpochRewardsId()
+    try {
+      const result = await this.invokeReadOnly(contractId, 'get_epoch', [
+        nativeToScVal(BigInt(epochNumber), { type: 'u64' }),
+      ])
+      const native = scValToNative(result) as Record<string, unknown> | null | undefined
+      if (!native) return null
+
+      const startTs = Number(native.start_ts ?? 0)
+      const durationSecs = Number(native.duration_secs ?? 0)
+      return {
+        epochNumber: Number(native.epoch_number ?? epochNumber),
+        startTs,
+        durationSecs,
+        endTs: startTs + durationSecs,
+        sealed: Boolean(native.sealed),
+        sealTs: Number(native.seal_ts ?? 0),
+        totalRewards: BigInt((native.total_rewards ?? 0) as bigint),
+        totalStakedAtSeal: BigInt(((native.total_staked_at_seal ?? 0) as bigint)),
+        carriedForward: BigInt((native.carried_forward ?? 0) as bigint),
+      }
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError(`Failed to read epoch ${epochNumber}`, contractId, 'get_epoch', err)
+    }
+  }
+
+  async epochRewardsTotalStaked(): Promise<bigint> {
+    const contractId = this.getEpochRewardsId()
+    try {
+      return BigInt(scValToNative(await this.invokeReadOnly(contractId, 'total_staked', [])) as bigint)
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to read total staked', contractId, 'total_staked', err)
+    }
+  }
+
+  async epochRewardsGetClaimable(user: string): Promise<bigint> {
+    const contractId = this.getEpochRewardsId()
+    try {
+      const result = await this.invokeReadOnly(contractId, 'get_claimable', [
+        nativeToScVal(new Address(user)),
+      ])
+      return BigInt(scValToNative(result) as bigint)
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError(`Failed to read claimable for ${user}`, contractId, 'get_claimable', err)
+    }
+  }
+
+  async epochRewardsGetStake(user: string): Promise<bigint | null> {
+    const contractId = this.getEpochRewardsId()
+    try {
+      const result = await this.invokeReadOnly(contractId, 'get_stake', [
+        nativeToScVal(new Address(user)),
+      ])
+      return BigInt(scValToNative(result) as bigint)
+    } catch (err) {
+      // The contract's documented surface has no per-user stake getter; a build without one is not an error.
+      logger.debug('epoch_rewards get_stake unavailable', { user, error: String(err) })
+      return null
+    }
+  }
+
+  async epochRewardsFund(amount: bigint): Promise<string> {
+    const contractId = this.getEpochRewardsId()
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for epoch funding')
+    }
+    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
+    // fund_epoch_rewards(caller, amount): the caller is the admin or operator key.
+    const txHash = await this.adminSigningService.executeAdminOperation({
+      contractId,
+      operation: 'fund_epoch_rewards',
+      args: [nativeToScVal(new Address(adminAddress)), nativeToScVal(amount, { type: 'i128' })],
+      networkPassphrase: this.config.networkPassphrase,
+      adminSecret: this.config.adminSecret,
+      server: this.server,
+    })
+    logger.info('Epoch rewards funded', { amount: amount.toString(), txHash })
+    return txHash
+  }
+
+  async epochRewardsSeal(targetEpoch: number, nextEpochDurationSecs: number): Promise<string> {
+    const contractId = this.getEpochRewardsId()
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for epoch sealing')
+    }
+    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
+    // seal_epoch(caller, target_epoch, next_epoch_duration_secs)
+    const txHash = await this.adminSigningService.executeAdminOperation({
+      contractId,
+      operation: 'seal_epoch',
+      args: [
+        nativeToScVal(new Address(adminAddress)),
+        nativeToScVal(BigInt(targetEpoch), { type: 'u64' }),
+        nativeToScVal(BigInt(nextEpochDurationSecs), { type: 'u64' }),
+      ],
+      networkPassphrase: this.config.networkPassphrase,
+      adminSecret: this.config.adminSecret,
+      server: this.server,
+    })
+    logger.info('Epoch sealed', { targetEpoch, txHash })
+    return txHash
+  }
+
+  /** Arguments of a user-signed epoch call: stake/unstake(user, amount), claim(user). */
+  private epochRewardsCallArgs(call: EpochRewardsCall, user: string, amount?: bigint): xdr.ScVal[] {
+    const userArg = nativeToScVal(new Address(user))
+    if (call === 'claim') return [userArg]
+    if (amount === undefined || amount <= 0n) {
+      throw new ContractError(`${call} needs a positive amount`, this.getEpochRewardsId(), call)
+    }
+    return [userArg, nativeToScVal(amount, { type: 'i128' })]
+  }
+
+  async prepareEpochRewardsCall(call: EpochRewardsCall, user: string, amount?: bigint): Promise<string> {
+    return this.prepareUserInvocation(
+      this.getEpochRewardsId(),
+      user,
+      call,
+      this.epochRewardsCallArgs(call, user, amount),
+    )
+  }
+
+  async submitEpochRewardsCall(
+    signedXdr: string,
+    call: EpochRewardsCall,
+    user: string,
+    amount?: bigint,
+  ): Promise<string> {
+    const tx = assertSignedInvocation(signedXdr, {
+      contractId: this.getEpochRewardsId(),
+      functionName: call,
+      args: this.epochRewardsCallArgs(call, user, amount),
+      signer: user,
+      networkPassphrase: this.config.networkPassphrase,
+      label: `epoch rewards ${call}`,
+    })
+    const txHash = await this.broadcastSigned(tx, call)
+    logger.info('Epoch rewards call submitted', { call, user, txHash })
+    return txHash
+  }
+
+  // ── multisig_admin contract (#1972) ─────────────────────────────────────────
+
+  multisigEnabled(): boolean {
+    return !!this.config.multisigAdminId
+  }
+
+  multisigContractId(): string | undefined {
+    return this.config.multisigAdminId
+  }
+
+  private getMultisigId(): string {
+    if (!this.config.multisigAdminId) {
+      throw new ConfigurationError('MULTISIG_ADMIN_ID not configured')
+    }
+    return this.config.multisigAdminId
+  }
+
+  async multisigGetConfig(): Promise<MultisigConfig> {
+    const contractId = this.getMultisigId()
+    try {
+      const [signers, threshold] = await Promise.all([
+        this.invokeReadOnly(contractId, 'get_signers', []),
+        this.invokeReadOnly(contractId, 'get_threshold', []),
+      ])
+      return {
+        signers: (scValToNative(signers) as unknown[]).map(String),
+        threshold: Number(scValToNative(threshold)),
+      }
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to read multisig config', contractId, 'get_signers', err)
+    }
+  }
+
+  private static readonly MULTISIG_STATUS: Record<number, MultisigProposalStatus> = {
+    1: 'pending',
+    2: 'executed',
+    3: 'cancelled',
+    4: 'expired',
+  }
+
+  private static readonly MULTISIG_STATUS_CODE: Record<MultisigProposalStatus, number> = {
+    pending: 1,
+    executed: 2,
+    cancelled: 3,
+    expired: 4,
+  }
+
+  private decodeMultisigProposal(result: xdr.ScVal): MultisigProposal | null {
+    const native = scValToNative(result) as Record<string, unknown> | null | undefined
+    if (!native) return null
+    const rawArgs = (native.args ?? []) as unknown[]
+    const status = RealSorobanAdapter.MULTISIG_STATUS[Number(native.status)]
+    return {
+      id: Number(native.id),
+      proposer: String(native.proposer),
+      target: String(native.target),
+      function: String(native.function),
+      // Arguments were already decoded by scValToNative; make them JSON-safe.
+      args: decodeProposalArgs(rawArgs.map((arg) => nativeToScVal(arg as never))),
+      approvals: ((native.approvals ?? []) as unknown[]).map(String),
+      status: status ?? 'pending',
+      createdAt: Number(native.created_at),
+      expiresAt: Number(native.expires_at),
+    }
+  }
+
+  async multisigGetProposal(proposalId: number): Promise<MultisigProposal | null> {
+    const contractId = this.getMultisigId()
+    try {
+      const result = await this.invokeReadOnly(contractId, 'get_proposal', [
+        nativeToScVal(BigInt(proposalId), { type: 'u64' }),
+      ])
+      return this.decodeMultisigProposal(result)
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      // get_proposal fails with ProposalNotFound for an unknown id.
+      logger.debug('multisig get_proposal failed', { proposalId, error: String(err) })
+      return null
+    }
+  }
+
+  async multisigListProposals(status?: MultisigProposalStatus): Promise<MultisigProposal[]> {
+    const contractId = this.getMultisigId()
+    try {
+      // Option<ProposalStatus>: a C-style enum is a u32 on the wire, and `Some(x)` is just `x`.
+      const filter = status
+        ? xdr.ScVal.scvU32(RealSorobanAdapter.MULTISIG_STATUS_CODE[status])
+        : xdr.ScVal.scvVoid()
+      const ids = scValToNative(await this.invokeReadOnly(contractId, 'list_proposals', [filter])) as unknown[]
+      const proposals = await Promise.all(ids.map((id) => this.multisigGetProposal(Number(id))))
+      return proposals.filter((p): p is MultisigProposal => p !== null)
+    } catch (err) {
+      if (err instanceof SorobanError) throw err
+      throw new ContractError('Failed to list multisig proposals', contractId, 'list_proposals', err)
+    }
+  }
+
+  async multisigPropose(
+    target: string,
+    functionName: string,
+    args: MultisigArg[],
+  ): Promise<{ txHash: string; proposalId?: number }> {
+    const contractId = this.getMultisigId()
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for multisig proposals')
+    }
+    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
+    const argVec = xdr.ScVal.scvVec(args.map(encodeMultisigArg))
+
+    const txHash = await this.adminSigningService.executeAdminOperation({
+      contractId,
+      operation: 'propose',
+      args: [
+        nativeToScVal(new Address(adminAddress)),
+        nativeToScVal(new Address(target)),
+        nativeToScVal(functionName, { type: 'symbol' }),
+        argVec,
+      ],
+      networkPassphrase: this.config.networkPassphrase,
+      adminSecret: this.config.adminSecret,
+      server: this.server,
+    })
+
+    // The call returns only a hash; the new proposal is the highest id.
+    let proposalId: number | undefined
+    try {
+      const all = await this.multisigListProposals()
+      proposalId = all.reduce<number | undefined>((max, p) => (max === undefined || p.id > max ? p.id : max), undefined)
+    } catch {
+      proposalId = undefined
+    }
+    logger.info('Multisig proposal filed', { target, functionName, proposalId, txHash })
+    return { txHash, proposalId }
+  }
+
+  /** Arguments of a user-signed multisig call. */
+  private multisigCallArgs(call: MultisigCall, params: MultisigCallParams): xdr.ScVal[] {
+    const contractId = this.getMultisigId()
+    const signer = nativeToScVal(new Address(params.signer))
+    if (call === 'propose') {
+      if (!params.target || !params.functionName) {
+        throw new ContractError('propose needs a target and function', contractId, call)
+      }
+      return [
+        signer,
+        nativeToScVal(new Address(params.target)),
+        nativeToScVal(params.functionName, { type: 'symbol' }),
+        xdr.ScVal.scvVec((params.args ?? []).map(encodeMultisigArg)),
+      ]
+    }
+    if (params.proposalId === undefined) {
+      throw new ContractError(`${call} needs a proposal id`, contractId, call)
+    }
+    return [signer, nativeToScVal(BigInt(params.proposalId), { type: 'u64' })]
+  }
+
+  async prepareMultisigCall(call: MultisigCall, params: MultisigCallParams): Promise<string> {
+    return this.prepareUserInvocation(
+      this.getMultisigId(),
+      params.signer,
+      call,
+      this.multisigCallArgs(call, params),
+    )
+  }
+
+  async submitMultisigCall(
+    signedXdr: string,
+    call: MultisigCall,
+    params: MultisigCallParams,
+  ): Promise<string> {
+    const tx = assertSignedInvocation(signedXdr, {
+      contractId: this.getMultisigId(),
+      functionName: call,
+      args: this.multisigCallArgs(call, params),
+      signer: params.signer,
+      networkPassphrase: this.config.networkPassphrase,
+      label: `multisig ${call}`,
+    })
+    const txHash = await this.broadcastSigned(tx, call)
+    logger.info('Multisig call submitted', { call, signer: params.signer, txHash })
+    return txHash
   }
 
   // ── rent_payments contract ──────────────────────────────────────────────────

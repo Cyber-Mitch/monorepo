@@ -180,6 +180,71 @@ export interface VestingScheduleRecord {
   revoked: boolean
 }
 
+/** The user-signed calls on the epoch_rewards contract (#1965). */
+export type EpochRewardsCall = 'stake' | 'unstake' | 'claim'
+
+/** Mirrors the epoch_rewards contract's `EpochInfo`. Times are unix seconds, amounts are token base units. */
+export interface EpochRewardsEpoch {
+  epochNumber: number
+  startTs: number
+  durationSecs: number
+  /** When the epoch may be sealed: `startTs + durationSecs`. */
+  endTs: number
+  sealed: boolean
+  /** When it was sealed; 0 while open. */
+  sealTs: number
+  totalRewards: bigint
+  /** Total staked when the epoch was sealed; 0 while open. */
+  totalStakedAtSeal: bigint
+  carriedForward: bigint
+}
+
+/** An argument for a call proposed through the multisig contract, in a form that survives JSON. */
+export type MultisigArg =
+  | { type: 'address'; value: string }
+  | { type: 'symbol'; value: string }
+  | { type: 'string'; value: string }
+  | { type: 'bool'; value: boolean }
+  | { type: 'u32' | 'i32'; value: number }
+  | { type: 'u64' | 'i64' | 'u128' | 'i128'; value: string }
+
+export type MultisigProposalStatus = 'pending' | 'executed' | 'cancelled' | 'expired'
+
+/** Mirrors the multisig_admin contract's `Proposal`. Times are unix seconds. */
+export interface MultisigProposal {
+  id: number
+  proposer: string
+  target: string
+  function: string
+  /** Arguments decoded to JSON-safe values (large integers as decimal strings). */
+  args: unknown[]
+  approvals: string[]
+  status: MultisigProposalStatus
+  createdAt: number
+  expiresAt: number
+}
+
+/** The multisig contract's signer set and approval threshold. */
+export interface MultisigConfig {
+  signers: string[]
+  threshold: number
+}
+
+/** The user-signed calls on the multisig_admin contract (#1972). */
+export type MultisigCall = 'propose' | 'approve' | 'revoke_approval' | 'execute'
+
+/** What a prepare/submit pair of a multisig call acts on. */
+export interface MultisigCallParams {
+  /** The signer's wallet (G...), who must sign the transaction. */
+  signer: string
+  /** Required for approve, revoke_approval and execute. */
+  proposalId?: number
+  /** Required for propose. */
+  target?: string
+  functionName?: string
+  args?: MultisigArg[]
+}
+
 /**
  * Allowlist entry from allowlist_registry contract.
  * Mirrors the contract's Entry struct.
@@ -317,4 +382,44 @@ export interface SorobanAdapter {
   getClaimableVested?(beneficiary: string): Promise<bigint>
   prepareVestingClaim?(beneficiary: string): Promise<string>
   submitVestingClaim?(signedXdr: string, beneficiary: string): Promise<string>
+
+  // epoch_rewards contract — sealed, epoch-based staking rewards (#1965). Funding and
+  // sealing are admin-signed; stake, unstake and claim need the user's own signature,
+  // so they are prepared as unsigned transactions and submitted after signing.
+  epochRewardsCurrentEpoch?(): Promise<number>
+  epochRewardsGetEpoch?(epochNumber: number): Promise<EpochRewardsEpoch | null>
+  epochRewardsTotalStaked?(): Promise<bigint>
+  epochRewardsGetClaimable?(user: string): Promise<bigint>
+  /** The user's staked amount, or null when the deployed contract exposes no per-user getter. */
+  epochRewardsGetStake?(user: string): Promise<bigint | null>
+  epochRewardsFund?(amount: bigint): Promise<string>
+  epochRewardsSeal?(targetEpoch: number, nextEpochDurationSecs: number): Promise<string>
+  prepareEpochRewardsCall?(call: EpochRewardsCall, user: string, amount?: bigint): Promise<string>
+  submitEpochRewardsCall?(
+    signedXdr: string,
+    call: EpochRewardsCall,
+    user: string,
+    amount?: bigint,
+  ): Promise<string>
+
+  // multisig_admin contract — M-of-N approval for privileged on-chain actions (#1972).
+  // Signers approve with their own wallets (prepare/submit). When the multisig is
+  // configured, selected admin operations are proposed through `multisigPropose`,
+  // signed by the platform key (which must be a registered signer).
+  multisigEnabled?(): boolean
+  multisigContractId?(): string | undefined
+  multisigGetConfig?(): Promise<MultisigConfig>
+  multisigListProposals?(status?: MultisigProposalStatus): Promise<MultisigProposal[]>
+  multisigGetProposal?(proposalId: number): Promise<MultisigProposal | null>
+  multisigPropose?(
+    target: string,
+    functionName: string,
+    args: MultisigArg[],
+  ): Promise<{ txHash: string; proposalId?: number }>
+  prepareMultisigCall?(call: MultisigCall, params: MultisigCallParams): Promise<string>
+  submitMultisigCall?(
+    signedXdr: string,
+    call: MultisigCall,
+    params: MultisigCallParams,
+  ): Promise<string>
 }

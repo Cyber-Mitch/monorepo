@@ -50,6 +50,8 @@ export type AdminOperation =
   // vesting_schedule contract (#1911). Admin-funded schedules and revocation.
   | 'create_vesting_schedule'
   | 'revoke'
+  // multisig_admin (#1972): the platform key, as a registered signer, files proposals for covered admin actions.
+  | 'propose'
 
 /**
  * Parameters for admin operations
@@ -200,6 +202,9 @@ export class AdminSigningService {
       'execute_proposal',
       'create_vesting_schedule',
       'revoke',
+      'fund_epoch_rewards',
+      'seal_epoch',
+      'propose',
     ]
     if (!allowedOperations.includes(params.operation)) {
       throw new ConfigurationError(

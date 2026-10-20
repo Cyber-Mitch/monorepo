@@ -21,6 +21,8 @@ export type SorobanConfig = {
   slashingModuleId?: string
   bondCollateralId?: string
   vestingScheduleId?: string
+  epochRewardsId?: string
+  multisigAdminId?: string
   whistleblowerRewardsId?: string
   tenantReputationId?: string
   adminSecret?: string
@@ -50,6 +52,8 @@ export function getSorobanConfigFromEnv(env: NodeJS.ProcessEnv): SorobanConfig {
     slashingModuleId: addresses.slashingModule,
     bondCollateralId: addresses.bondCollateral,
     vestingScheduleId: addresses.vestingSchedule,
+    epochRewardsId: addresses.epochRewards,
+    multisigAdminId: addresses.multisigAdmin,
     whistleblowerRewardsId: addresses.whistleblowerRewards,
     tenantReputationId: addresses.tenantReputation,
     adminSecret: env.SOROBAN_ADMIN_SECRET,
