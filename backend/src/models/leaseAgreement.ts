@@ -20,6 +20,8 @@ export interface LeaseAgreement {
    * value to prove the document has not changed since it was generated (#1960).
    */
   documentHash?: string
+  /** Version of the lease template the document was rendered from (#1954). */
+  templateVersion?: string
   status: LeaseStatus
   tenantSignedAt?: Date
   landlordSignedAt?: Date
@@ -33,6 +35,7 @@ export interface CreateLeaseInput {
   dealId: string
   documentKey: string
   documentHash?: string
+  templateVersion?: string
 }
 
 /** A recorded signature event for a lease (one per party). */

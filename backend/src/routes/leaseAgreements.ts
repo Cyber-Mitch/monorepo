@@ -8,7 +8,12 @@ import { leaseAgreementStore } from '../models/leaseAgreementStore.js'
 import { leaseSignatureStore } from '../models/leaseSignatureStore.js'
 import { LeaseStatus } from '../models/leaseAgreement.js'
 import { dealStore } from '../models/dealStore.js'
-import { generateLeaseDraft, buildLeaseTemplateData } from '../services/leaseDocumentService.js'
+import {
+  generateLeaseDraft,
+  buildLeaseTemplateData,
+  resolveLeaseParties,
+} from '../services/leaseDocumentService.js'
+import { listingStore } from '../models/listingStore.js'
 import { createESignatureProvider, computeDocumentHash } from '../services/eSignatureService.js'
 import { checkDocumentIntegrity } from '../services/leaseIntegrity.js'
 import { signatureRequestSchema } from '../schemas/leaseAgreement.js'
@@ -40,12 +45,25 @@ router.post(
         throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only admins or landlords can generate leases')
       }
 
-      const templateData = buildLeaseTemplateData(deal, deal.listingId || 'Property')
-      const { leaseId, documentKey } = await generateLeaseDraft(dealId, templateData)
+      // The lease names real people and a real address; never fall back to placeholders.
+      if (!deal.listingId) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 422, 'Cannot draft the lease: the deal has no listing, so there is no property address')
+      }
+      const listing = await listingStore.getById(deal.listingId)
+      if (!listing?.address?.trim()) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 422, 'Cannot draft the lease: the listing has no property address')
+      }
+      const parties = await resolveLeaseParties(deal)
+
+      const templateData = buildLeaseTemplateData(deal, listing.address, parties)
+      const { leaseId, documentKey, documentHash, templateVersion } = await generateLeaseDraft(
+        dealId,
+        templateData,
+      )
 
       res.status(201).json({
         success: true,
-        data: { leaseId, documentKey, status: LeaseStatus.DRAFT },
+        data: { leaseId, documentKey, documentHash, templateVersion, status: LeaseStatus.DRAFT },
       })
     } catch (error) {
       next(error)
@@ -79,9 +97,10 @@ router.post(
       }
 
       // Create signing request with stub provider
-      await esignProvider.createSigningRequest(lease.documentKey, computeDocumentHash(lease.documentKey), [
-        { id: deal.tenantId, name: `Tenant ${deal.tenantId}`, email: '', role: 'tenant' },
-        { id: deal.landlordId, name: `Landlord ${deal.landlordId}`, email: '', role: 'landlord' },
+      const parties = await resolveLeaseParties(deal)
+      await esignProvider.createSigningRequest(lease.documentKey, lease.documentHash ?? computeDocumentHash(lease.documentKey), [
+        { id: deal.tenantId, name: parties.tenantName, email: parties.tenantEmail ?? '', role: 'tenant' },
+        { id: deal.landlordId, name: parties.landlordName, email: parties.landlordEmail ?? '', role: 'landlord' },
       ])
 
       // Update lease status
@@ -130,9 +149,10 @@ router.get(
 
       // Get signing URL from provider
       // In stub mode, we create a new request for each URL request
-      const signingRequest = await esignProvider.createSigningRequest(lease.documentKey, computeDocumentHash(lease.documentKey), [
-        { id: deal.tenantId, name: '', email: '', role: 'tenant' },
-        { id: deal.landlordId, name: '', email: '', role: 'landlord' },
+      const parties = await resolveLeaseParties(deal)
+      const signingRequest = await esignProvider.createSigningRequest(lease.documentKey, lease.documentHash ?? computeDocumentHash(lease.documentKey), [
+        { id: deal.tenantId, name: parties.tenantName, email: parties.tenantEmail ?? '', role: 'tenant' },
+        { id: deal.landlordId, name: parties.landlordName, email: parties.landlordEmail ?? '', role: 'landlord' },
       ])
 
       const signingUrl = await esignProvider.getSigningUrl(signingRequest.requestId, signerId)

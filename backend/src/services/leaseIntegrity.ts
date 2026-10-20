@@ -4,8 +4,8 @@
  * The hash recorded when a lease is generated is compared against a fresh hash
  * of the stored document bytes. When no object store is configured (local
  * development / unit tests) the document key itself is treated as the document
- * content, matching how `generateLeaseDraft` records the hash today. Once #1954
- * produces a real PDF, `hashStoredDocument` transparently hashes its bytes.
+ * content, which is how leases created before real PDFs were generated (#1954)
+ * recorded their hash. For current leases `hashStoredDocument` hashes the PDF bytes.
  */
 
 import { createHash } from 'node:crypto'
