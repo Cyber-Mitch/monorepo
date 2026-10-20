@@ -98,7 +98,7 @@ export class WithdrawalPayoutWorker {
     const provider = this.resolveProvider(this.rail)
     const executePayout = provider.executePayout?.bind(provider)
     if (!executePayout) {
-      if (this.walletService.listWithdrawalsByStatus('approved').length > 0) {
+      if ((await this.walletService.listWithdrawalsByStatus('approved')).length > 0) {
         logger.warn('Approved withdrawals waiting: PSP provider has no executePayout', {
           provider: provider.name,
         })
@@ -107,12 +107,12 @@ export class WithdrawalPayoutWorker {
     }
 
     let attempted = 0
-    for (const withdrawal of this.walletService.listWithdrawalsByStatus('approved').slice(0, this.batchSize)) {
-      const claimed = this.walletService.claimForPayout(withdrawal.id)
+    for (const withdrawal of (await this.walletService.listWithdrawalsByStatus('approved', this.batchSize)).slice(0, this.batchSize)) {
+      const claimed = await this.walletService.claimForPayout(withdrawal.id)
       if (!claimed) continue
       attempted += 1
 
-      const userId = this.walletService.getWithdrawalUserId(withdrawal.id)!
+      const userId = (await this.walletService.getWithdrawalUserId(withdrawal.id))!
       try {
         const result = await executePayout({
           amountNgn: withdrawal.amountNgn,
@@ -143,12 +143,11 @@ export class WithdrawalPayoutWorker {
 
   /** Checks payouts stuck in 'processing' with the PSP. Never resubmits. */
   async recoverStuck(): Promise<number> {
-    const stuck = this.walletService
-      .listWithdrawalsByStatus('processing')
-      .filter((w) => {
-        const startedAt = this.walletService.getPayoutStartedAt(w.id) ?? 0
-        return Date.now() - startedAt >= this.stuckAfterMs
-      })
+    const stuck: Awaited<ReturnType<typeof this.walletService.listWithdrawalsByStatus>> = []
+    for (const w of await this.walletService.listWithdrawalsByStatus('processing')) {
+      const startedAt = (await this.walletService.getPayoutStartedAt(w.id)) ?? 0
+      if (Date.now() - startedAt >= this.stuckAfterMs) stuck.push(w)
+    }
     if (stuck.length === 0) return 0
 
     const provider = this.resolveProvider(this.rail)
@@ -171,7 +170,7 @@ export class WithdrawalPayoutWorker {
         } else if (status.status === 'failed') {
           const reason = status.providerStatus ?? 'Transfer failed at provider'
           await this.walletService.failPayout(withdrawal.id, reason)
-          await this.notify(this.walletService.getWithdrawalUserId(withdrawal.id)!, withdrawal.id, reason)
+          await this.notify((await this.walletService.getWithdrawalUserId(withdrawal.id))!, withdrawal.id, reason)
         } else {
           logger.warn('Stuck payout still pending at provider', { withdrawalId: withdrawal.id })
         }

@@ -14,6 +14,7 @@ vi.mock('../schemas/env.js', () => ({
 }))
 
 import { createAdminWhistleblowerApplicationsRouter } from './adminWhistleblowerApplications.js'
+import { adminAuthHeader, seedAdminSession } from '../test-fixtures/adminAuth.js'
 
 const ADMIN_SECRET = 'test-admin-secret'
 
@@ -33,6 +34,7 @@ describe('Admin whistleblower applications API', () => {
   }
 
   beforeEach(async () => {
+    await seedAdminSession()
     uuidSequence = 0
     await whistleblowerApplicationStore.clear()
   })
@@ -68,13 +70,13 @@ describe('Admin whistleblower applications API', () => {
 
     await request
       .post(`/api/admin/whistleblower-applications/${approved.applicationId}/approve`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({ reviewedBy: 'admin@example.com' })
       .expect(200)
 
     await request
       .post(`/api/admin/whistleblower-applications/${rejected.applicationId}/reject`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({
         reviewedBy: 'admin@example.com',
         reason: 'Identity signals did not match the application.',
@@ -83,7 +85,7 @@ describe('Admin whistleblower applications API', () => {
 
     const allResponse = await request
       .get('/api/admin/whistleblower-applications')
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .expect(200)
 
     expect(allResponse.body.success).toBe(true)
@@ -92,7 +94,7 @@ describe('Admin whistleblower applications API', () => {
 
     const pendingResponse = await request
       .get('/api/admin/whistleblower-applications')
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .query({ status: 'pending' })
       .expect(200)
 
@@ -101,7 +103,7 @@ describe('Admin whistleblower applications API', () => {
 
     const approvedResponse = await request
       .get('/api/admin/whistleblower-applications')
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .query({ status: 'approved' })
       .expect(200)
 
@@ -110,7 +112,7 @@ describe('Admin whistleblower applications API', () => {
 
     const rejectedResponse = await request
       .get('/api/admin/whistleblower-applications')
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .query({ status: 'rejected' })
       .expect(200)
 
@@ -123,7 +125,7 @@ describe('Admin whistleblower applications API', () => {
 
     const response = await request
       .get(`/api/admin/whistleblower-applications/${application.applicationId}`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .expect(200)
 
     expect(response.body.success).toBe(true)
@@ -137,7 +139,7 @@ describe('Admin whistleblower applications API', () => {
 
     const response = await request
       .post(`/api/admin/whistleblower-applications/${application.applicationId}/approve`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({ reviewedBy: 'admin@example.com' })
       .expect(200)
 
@@ -152,7 +154,7 @@ describe('Admin whistleblower applications API', () => {
 
     const response = await request
       .post(`/api/admin/whistleblower-applications/${application.applicationId}/reject`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({
         reviewedBy: 'admin@example.com',
         reason: 'Identity signals did not match the application.',
@@ -173,13 +175,13 @@ describe('Admin whistleblower applications API', () => {
 
     await request
       .post(`/api/admin/whistleblower-applications/${application.applicationId}/approve`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({ reviewedBy: 'admin@example.com' })
       .expect(200)
 
     const response = await request
       .post(`/api/admin/whistleblower-applications/${application.applicationId}/reject`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({
         reviewedBy: 'admin@example.com',
         reason: 'Should not be accepted after approval.',
@@ -196,14 +198,14 @@ describe('Admin whistleblower applications API', () => {
 
     const detailResponse = await request
       .get(`/api/admin/whistleblower-applications/${missingId}`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .expect(404)
 
     expect(detailResponse.body.error.code).toBe('NOT_FOUND')
 
     const approveResponse = await request
       .post(`/api/admin/whistleblower-applications/${missingId}/approve`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({ reviewedBy: 'admin@example.com' })
       .expect(404)
 
@@ -211,7 +213,7 @@ describe('Admin whistleblower applications API', () => {
 
     const rejectResponse = await request
       .post(`/api/admin/whistleblower-applications/${missingId}/reject`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({
         reviewedBy: 'admin@example.com',
         reason: 'Identity signals did not match the application.',
@@ -221,36 +223,36 @@ describe('Admin whistleblower applications API', () => {
     expect(rejectResponse.body.error.code).toBe('NOT_FOUND')
   })
 
-  it('rejects requests without admin secret on list endpoint', async () => {
+  it('rejects requests without authentication on list endpoint', async () => {
     const response = await request
       .get('/api/admin/whistleblower-applications')
-      .expect(403)
+      .expect(401)
 
-    expect(response.body.error.code).toBe('FORBIDDEN')
+    expect(response.body.error.code).toBe('UNAUTHORIZED')
   })
 
-  it('rejects requests without admin secret on detail endpoint', async () => {
+  it('rejects requests without authentication on detail endpoint', async () => {
     const application = await createApplication()
 
     const response = await request
       .get(`/api/admin/whistleblower-applications/${application.applicationId}`)
-      .expect(403)
+      .expect(401)
 
-    expect(response.body.error.code).toBe('FORBIDDEN')
+    expect(response.body.error.code).toBe('UNAUTHORIZED')
   })
 
-  it('rejects requests without admin secret on approve endpoint', async () => {
+  it('rejects requests without authentication on approve endpoint', async () => {
     const application = await createApplication()
 
     const response = await request
       .post(`/api/admin/whistleblower-applications/${application.applicationId}/approve`)
       .send({ reviewedBy: 'admin@example.com' })
-      .expect(403)
+      .expect(401)
 
-    expect(response.body.error.code).toBe('FORBIDDEN')
+    expect(response.body.error.code).toBe('UNAUTHORIZED')
   })
 
-  it('rejects requests without admin secret on reject endpoint', async () => {
+  it('rejects requests without authentication on reject endpoint', async () => {
     const application = await createApplication()
 
     const response = await request
@@ -259,9 +261,9 @@ describe('Admin whistleblower applications API', () => {
         reviewedBy: 'admin@example.com',
         reason: 'Identity signals did not match the application.',
       })
-      .expect(403)
+      .expect(401)
 
-    expect(response.body.error.code).toBe('FORBIDDEN')
+    expect(response.body.error.code).toBe('UNAUTHORIZED')
   })
 
   it('accepts requests with valid admin secret', async () => {
@@ -269,17 +271,17 @@ describe('Admin whistleblower applications API', () => {
 
     await request
       .get('/api/admin/whistleblower-applications')
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .expect(200)
 
     await request
       .get(`/api/admin/whistleblower-applications/${application.applicationId}`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .expect(200)
 
     await request
       .post(`/api/admin/whistleblower-applications/${application.applicationId}/approve`)
-      .set('x-admin-secret', ADMIN_SECRET)
+      .set(adminAuthHeader)
       .send({ reviewedBy: 'admin@example.com' })
       .expect(200)
   })

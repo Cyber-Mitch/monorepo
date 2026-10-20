@@ -313,13 +313,13 @@ paths:
         it last ran, how long that run took, how many records it processed, and
         whether it is overdue. A job that has stopped being scheduled reports
         state "overdue" (or "never_ran") so a missing run is detectable as an
-        absence rather than only as an error. Requires the x-admin-secret header
-        when MANUAL_ADMIN_SECRET is configured.
+        absence rather than only as an error. Requires an admin session with the
+        jobs:view permission.
       operationId: getJobHealth
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       responses:
         "200":
           description: Job health report
@@ -1250,10 +1250,66 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/admin/withdrawals:
+    get:
+      summary: List NGN withdrawals
+      description: |
+        Every user's withdrawals, newest first, so admins can see what is waiting for approval.
+        Filter with `status`; page with `limit` (1-100, default 20) and the `nextCursor` from the
+        previous page. Requires the payouts:trigger permission, as approve and reject do. (#1944)
+      operationId: listNgnWithdrawals
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, processing, confirmed, failed, rejected]
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of withdrawals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: '#/components/schemas/WithdrawalResponse'
+                            - type: object
+                              properties:
+                                userId: { type: string }
+                                approvedBy: { type: string, nullable: true }
+                                approvedAt: { type: string, format: date-time, nullable: true }
+                      nextCursor: { type: string, nullable: true }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/admin/withdrawals/{id}/approve:
     post:
       summary: Approve NGN withdrawal
-      description: Approves a pending withdrawal and queues it for provider payout. The payout worker sends the transfer and settles the withdrawal to confirmed or failed. Approval does not move money. Idempotent if already approved or settled.
+      description: Moves a pending withdrawal to approved and queues it for provider payout, recording who approved it. The payout worker sends the transfer and settles the withdrawal to confirmed or failed. Approval does not move money. Idempotent if already approved or settled.
       operationId: approveNgnWithdrawal
       tags:
         - Admin
@@ -2575,7 +2631,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -2644,7 +2700,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -2713,7 +2769,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -2779,7 +2835,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -2838,7 +2894,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -2897,7 +2953,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -2956,7 +3012,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminSecret: []
+        - bearerAdminAuth: []
       requestBody:
         required: true
         content:
@@ -11292,8 +11348,9 @@ components:
       in: header
       name: x-admin-secret
       description: >-
-        Shared operator secret checked against MANUAL_ADMIN_SECRET. Used by the
-        job-scheduler admin routes, which are reachable without a user session.
+        Deprecated shared operator secret checked against MANUAL_ADMIN_SECRET. The admin routes
+        no longer accept it unless ALLOW_LEGACY_ADMIN_SECRET=true is set (off by default); each
+        use is logged as a warning. Use an admin bearer token with the route's permission.
     webhookSignature:
       type: apiKey
       in: header

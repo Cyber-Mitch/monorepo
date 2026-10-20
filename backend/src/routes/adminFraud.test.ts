@@ -6,6 +6,7 @@ import { createAdminFraudRouter } from './adminFraud.js'
 import { getFraudStore } from '../fraud/store.js'
 import { getFraudEngine } from '../fraud/engine.js'
 import { SignalType, RiskLevel, EntityType, ActionType } from '../fraud/types.js'
+import { adminAuthHeader, seedAdminSession } from '../test-fixtures/adminAuth.js'
 
 vi.mock('../fraud/store.js', () => ({
   getFraudStore: vi.fn(),
@@ -61,7 +62,8 @@ function buildApp() {
 }
 
 describe('Admin Fraud Routes', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await seedAdminSession()
     vi.clearAllMocks()
   })
 
@@ -81,7 +83,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/signals')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.signals).toBeInstanceOf(Array)
@@ -102,28 +104,26 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/signals?enabled=true')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.signals.every((s: any) => s.enabled === true)).toBe(true)
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).get('/api/admin/fraud/signals')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
-        expect(res.body.error.message).toBe('Invalid admin secret')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
 
-      it('should reject request with invalid admin secret', async () => {
+      it('should reject request with an invalid token', async () => {
         const res = await request(buildApp())
           .get('/api/admin/fraud/signals')
-          .set('x-admin-secret', 'wrong-secret')
+          .set('Authorization', 'Bearer not-a-real-token')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
-        expect(res.body.error.message).toBe('Invalid admin secret')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('INVALID_TOKEN')
       })
     })
 
@@ -139,7 +139,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/signals/signal-1')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.signal.id).toBe('signal-1')
@@ -153,18 +153,18 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/signals/non-existent-id')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(404)
         expect(res.body.error.code).toBe('NOT_FOUND')
         expect(res.body.error.message).toContain('not found')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).get('/api/admin/fraud/signals/some-id')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -189,7 +189,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .post('/api/admin/fraud/signals')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send(newSignal)
 
         expect(res.status).toBe(201)
@@ -201,7 +201,7 @@ describe('Admin Fraud Routes', () => {
       it('should validate required fields', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/signals')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({ name: '' }) // Invalid: empty name
 
         expect(res.status).toBe(400)
@@ -211,7 +211,7 @@ describe('Admin Fraud Routes', () => {
       it('should validate scoreWeight range', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/signals')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({
             name: 'Test',
             signalType: SignalType.THRESHOLD,
@@ -223,13 +223,13 @@ describe('Admin Fraud Routes', () => {
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/signals')
           .send({ name: 'Test', signalType: SignalType.THRESHOLD, config: {} })
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -244,20 +244,20 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .put('/api/admin/fraud/signals/signal-1')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({ name: 'Updated Name' })
 
         expect(res.status).toBe(200)
         expect(res.body.signal.name).toBe('Updated Name')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .put('/api/admin/fraud/signals/some-id')
           .send({ name: 'Updated' })
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -269,17 +269,17 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .delete('/api/admin/fraud/signals/signal-1')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).delete('/api/admin/fraud/signals/some-id')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -291,17 +291,17 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .post('/api/admin/fraud/signals/signal-1/enable')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).post('/api/admin/fraud/signals/some-id/enable')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -313,17 +313,17 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .post('/api/admin/fraud/signals/signal-1/disable')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).post('/api/admin/fraud/signals/some-id/disable')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
   })
@@ -355,7 +355,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .post('/api/admin/fraud/evaluate')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send(evaluationRequest)
 
         expect(res.status).toBe(200)
@@ -367,14 +367,14 @@ describe('Admin Fraud Routes', () => {
       it('should validate required fields', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/evaluate')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({ entityType: EntityType.ACCOUNT }) // Missing entityId
 
         expect(res.status).toBe(400)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/evaluate')
           .send({
@@ -383,8 +383,8 @@ describe('Admin Fraud Routes', () => {
             eventData: {},
           })
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -402,7 +402,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments?riskLevel=high&limit=10')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.assessments).toBeInstanceOf(Array)
@@ -411,17 +411,17 @@ describe('Admin Fraud Routes', () => {
       it('should validate limit parameter', async () => {
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments?limit=300')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(400)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).get('/api/admin/fraud/assessments')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -437,7 +437,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments/assessment-1')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.assessment.id).toBe('assessment-1')
@@ -450,17 +450,17 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments/non-existent')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(404)
         expect(res.body.error.code).toBe('NOT_FOUND')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).get('/api/admin/fraud/assessments/some-id')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -478,18 +478,18 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments/entity/account/account-456')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.assessments).toBeInstanceOf(Array)
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments/entity/account/some-id')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
   })
@@ -509,17 +509,17 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/holds/account-789')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.holds).toBeInstanceOf(Array)
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).get('/api/admin/fraud/holds/some-account')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -531,7 +531,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .post('/api/admin/fraud/holds/hold-1/release')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({ releasedBy: 'admin-123' })
 
         expect(res.status).toBe(200)
@@ -541,20 +541,20 @@ describe('Admin Fraud Routes', () => {
       it('should validate releasedBy field', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/holds/some-hold-id/release')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({}) // Missing releasedBy
 
         expect(res.status).toBe(400)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/holds/some-hold-id/release')
           .send({ releasedBy: 'admin-123' })
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
   })
@@ -572,7 +572,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .get('/api/admin/fraud/thresholds')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
 
         expect(res.status).toBe(200)
         expect(res.body.thresholds).toBeDefined()
@@ -581,11 +581,11 @@ describe('Admin Fraud Routes', () => {
         expect(res.body.thresholds.critical).toBeDefined()
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp()).get('/api/admin/fraud/thresholds')
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
 
@@ -608,7 +608,7 @@ describe('Admin Fraud Routes', () => {
 
         const res = await request(buildApp())
           .put('/api/admin/fraud/thresholds')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send(newThresholds)
 
         expect(res.status).toBe(200)
@@ -620,20 +620,20 @@ describe('Admin Fraud Routes', () => {
       it('should validate threshold values are non-negative', async () => {
         const res = await request(buildApp())
           .put('/api/admin/fraud/thresholds')
-          .set('x-admin-secret', 'test-secret')
+          .set(adminAuthHeader)
           .send({ medium: -10 }) // Invalid: negative value
 
         expect(res.status).toBe(400)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
       })
 
-      it('should reject request without admin secret', async () => {
+      it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .put('/api/admin/fraud/thresholds')
           .send({ medium: 30 })
 
-        expect(res.status).toBe(403)
-        expect(res.body.error.code).toBe('FORBIDDEN')
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
       })
     })
   })

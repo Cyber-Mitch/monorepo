@@ -5,6 +5,7 @@ import { createCircuitBreakerRouter } from './circuitBreaker.js'
 import { SorobanAdapter } from '../soroban/adapter.js'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
+import { adminAuthHeader, seedAdminSession } from '../test-fixtures/adminAuth.js'
 
 // Mock the env module
 vi.mock('../schemas/env.js', () => ({
@@ -109,7 +110,8 @@ describe('Circuit Breaker Routes', () => {
   let app: express.Express
   let mockAdapter: MockSorobanAdapter
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await seedAdminSession()
     vi.clearAllMocks()
     app = express()
     app.use(express.json())
@@ -122,7 +124,7 @@ describe('Circuit Breaker Routes', () => {
     it('should freeze deal escrow with admin secret', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/freeze')
-        .set('x-admin-secret', 'test-secret')
+        .set(adminAuthHeader)
 
       expect(response.status).toBe(200)
       expect(response.body.success).toBe(true)
@@ -131,11 +133,11 @@ describe('Circuit Breaker Routes', () => {
       expect(mockAdapter.freeze).toHaveBeenCalled()
     })
 
-    it('should reject freeze without admin secret', async () => {
+    it('should reject freeze without authentication', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/freeze')
 
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(401)
     })
   })
 
@@ -143,7 +145,7 @@ describe('Circuit Breaker Routes', () => {
     it('should get circuit breaker status with admin secret', async () => {
       const response = await request(app)
         .get('/api/admin/circuit-breaker/status')
-        .set('x-admin-secret', 'test-secret')
+        .set(adminAuthHeader)
 
       expect(response.status).toBe(200)
       expect(response.body.frozen).toBe(false)
@@ -152,11 +154,11 @@ describe('Circuit Breaker Routes', () => {
       expect(mockAdapter.getCircuitBreakerState).toHaveBeenCalled()
     })
 
-    it('should reject status without admin secret', async () => {
+    it('should reject status without authentication', async () => {
       const response = await request(app)
         .get('/api/admin/circuit-breaker/status')
 
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(401)
     })
   })
 
@@ -164,7 +166,7 @@ describe('Circuit Breaker Routes', () => {
     it('should propose drain with admin secret', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/propose-drain')
-        .set('x-admin-secret', 'test-secret')
+        .set(adminAuthHeader)
         .send({
           destination: 'GDESTINATION123456',
         })
@@ -187,14 +189,14 @@ describe('Circuit Breaker Routes', () => {
       )
     })
 
-    it('should reject propose-drain without admin secret', async () => {
+    it('should reject propose-drain without authentication', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/propose-drain')
         .send({
           destination: 'GDESTINATION123456',
         })
 
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(401)
     })
   })
 
@@ -202,7 +204,7 @@ describe('Circuit Breaker Routes', () => {
     it('should execute drain with admin secret', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/execute-drain')
-        .set('x-admin-secret', 'test-secret')
+        .set(adminAuthHeader)
 
       expect(response.status).toBe(200)
       expect(response.body.success).toBe(true)
@@ -218,11 +220,11 @@ describe('Circuit Breaker Routes', () => {
       )
     })
 
-    it('should reject execute-drain without admin secret', async () => {
+    it('should reject execute-drain without authentication', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/execute-drain')
 
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(401)
     })
   })
 
@@ -230,7 +232,7 @@ describe('Circuit Breaker Routes', () => {
     it('should set recovery delay with admin secret', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/set-recovery-delay')
-        .set('x-admin-secret', 'test-secret')
+        .set(adminAuthHeader)
         .send({
           delaySeconds: 3600,
         })
@@ -242,14 +244,14 @@ describe('Circuit Breaker Routes', () => {
       expect(mockAdapter.setRecoveryDelay).toHaveBeenCalledWith(3600)
     })
 
-    it('should reject set-recovery-delay without admin secret', async () => {
+    it('should reject set-recovery-delay without authentication', async () => {
       const response = await request(app)
         .post('/api/admin/circuit-breaker/set-recovery-delay')
         .send({
           delaySeconds: 3600,
         })
 
-      expect(response.status).toBe(403)
+      expect(response.status).toBe(401)
     })
   })
 })

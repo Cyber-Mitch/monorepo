@@ -57,6 +57,8 @@ export enum ErrorCode {
   UNAUTHORIZED = "UNAUTHORIZED",
   FORBIDDEN = "FORBIDDEN",
   TOKEN_EXPIRED = "TOKEN_EXPIRED",
+  /** The caller is authenticated but must sign in again before a destructive admin action. */
+  REAUTH_REQUIRED = "REAUTH_REQUIRED",
   INVALID_TOKEN = "INVALID_TOKEN",
 
   // Rate limiting
@@ -116,6 +118,7 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.UNAUTHORIZED]: "permanent",
   [ErrorCode.FORBIDDEN]: "permanent",
   [ErrorCode.TOKEN_EXPIRED]: "permanent",
+  [ErrorCode.REAUTH_REQUIRED]: "permanent",
   [ErrorCode.INVALID_TOKEN]: "permanent",
   [ErrorCode.TOO_MANY_REQUESTS]: "transient",
   [ErrorCode.NOT_FOUND]: "permanent",

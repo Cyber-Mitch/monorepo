@@ -4,6 +4,7 @@ import { ngnWalletStore } from '../models/ngnWalletStore.js'
 import { userRiskStateStore } from '../models/userRiskStateStore.js'
 import { seedNgnWalletFixture } from '../test-fixtures/ngnWalletFixtures.js'
 import type { PaymentProvider } from '../payments/types.js'
+import { ngnWithdrawalStore } from '../models/ngnWithdrawalStore.js'
 import {
   WithdrawalPayoutWorker,
   payoutReferenceFor,
@@ -41,6 +42,7 @@ describe('WithdrawalPayoutWorker', () => {
   let service: NgnWalletService
 
   beforeEach(async () => {
+    await ngnWithdrawalStore.clear()
     service = new NgnWalletService()
     await ngnWalletStore.clear()
     userRiskStateStore.clear()
@@ -75,7 +77,7 @@ describe('WithdrawalPayoutWorker', () => {
         bankAccount,
       }),
     )
-    const settled = service.getWithdrawal(withdrawal.id)
+    const settled = (await service.getWithdrawal(withdrawal.id))
     expect(settled?.status).toBe('confirmed')
     expect(settled?.processedAt).toBeTruthy()
 
@@ -99,7 +101,7 @@ describe('WithdrawalPayoutWorker', () => {
 
     await worker(provider, { notifyFailure }).poll()
 
-    const failed = service.getWithdrawal(withdrawal.id)
+    const failed = (await service.getWithdrawal(withdrawal.id))
     expect(failed?.status).toBe('failed')
     expect(failed?.failureReason).toBe('insufficient_funds')
 
@@ -135,7 +137,7 @@ describe('WithdrawalPayoutWorker', () => {
     await w.poll()
     await w.poll()
 
-    expect(service.getWithdrawal(withdrawal.id)?.status).toBe('processing')
+    expect((await service.getWithdrawal(withdrawal.id))?.status).toBe('processing')
     expect(executePayout).toHaveBeenCalledTimes(1)
     expect(verifyPayout).not.toHaveBeenCalled()
     // Held funds stay held while the outcome is unknown
@@ -157,7 +159,7 @@ describe('WithdrawalPayoutWorker', () => {
 
     expect(executePayout).toHaveBeenCalledTimes(1)
     expect(verifyPayout).toHaveBeenCalledWith({ internalRef: payoutReferenceFor(withdrawal.id) })
-    expect(service.getWithdrawal(withdrawal.id)?.status).toBe('failed')
+    expect((await service.getWithdrawal(withdrawal.id))?.status).toBe('failed')
     expect((await service.getBalance(userId)).availableNgn).toBe(50000)
   })
 
@@ -172,7 +174,7 @@ describe('WithdrawalPayoutWorker', () => {
 
     await worker(provider, { stuckAfterMs: 0 }).poll()
 
-    expect(service.getWithdrawal(withdrawal.id)?.status).toBe('processing')
+    expect((await service.getWithdrawal(withdrawal.id))?.status).toBe('processing')
   })
 
   it('does nothing when the provider has no executePayout', async () => {
@@ -189,6 +191,7 @@ describe('NgnWalletService payout settlement (idempotency)', () => {
   let service: NgnWalletService
 
   beforeEach(async () => {
+    await ngnWithdrawalStore.clear()
     service = new NgnWalletService()
     await ngnWalletStore.clear()
     userRiskStateStore.clear()
@@ -198,8 +201,7 @@ describe('NgnWalletService payout settlement (idempotency)', () => {
   it('a duplicate confirmation webhook does not write a second WITHDRAWAL_CONFIRMED entry', async () => {
     const withdrawal = await service.initiateWithdrawal(userId, { amountNgn: 2000, bankAccount })
     await service.approveWithdrawal(withdrawal.id)
-    service.claimForPayout(withdrawal.id)
-
+    await service.claimForPayout(withdrawal.id)
     await service.completePayout(withdrawal.id)
     await service.completePayout(withdrawal.id)
 
@@ -212,8 +214,7 @@ describe('NgnWalletService payout settlement (idempotency)', () => {
   it('a duplicate failure webhook does not release the balance twice', async () => {
     const withdrawal = await service.initiateWithdrawal(userId, { amountNgn: 2000, bankAccount })
     await service.approveWithdrawal(withdrawal.id)
-    service.claimForPayout(withdrawal.id)
-
+    await service.claimForPayout(withdrawal.id)
     await service.failPayout(withdrawal.id, 'rejected')
     await service.failPayout(withdrawal.id, 'rejected')
 
@@ -227,13 +228,13 @@ describe('NgnWalletService payout settlement (idempotency)', () => {
     const withdrawal = await service.initiateWithdrawal(userId, { amountNgn: 2000, bankAccount })
     await service.approveWithdrawal(withdrawal.id)
 
-    expect(service.claimForPayout(withdrawal.id)?.status).toBe('processing')
-    expect(service.claimForPayout(withdrawal.id)).toBeNull()
+    expect((await service.claimForPayout(withdrawal.id))?.status).toBe('processing')
+    expect((await service.claimForPayout(withdrawal.id))).toBeNull()
   })
 
   it('a pending (not yet approved) withdrawal cannot be claimed for payout', async () => {
     const withdrawal = await service.initiateWithdrawal(userId, { amountNgn: 2000, bankAccount })
 
-    expect(service.claimForPayout(withdrawal.id)).toBeNull()
+    expect((await service.claimForPayout(withdrawal.id))).toBeNull()
   })
 })

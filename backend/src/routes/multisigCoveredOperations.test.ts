@@ -7,6 +7,7 @@ import { requestIdMiddleware } from '../middleware/requestId.js'
 import { createCircuitBreakerRouter } from './circuitBreaker.js'
 import { createAdminContractAccessRouter } from './adminContractAccess.js'
 import { StubSorobanAdapter } from '../soroban/stub-adapter.js'
+import { adminAuthHeader, seedAdminSession } from '../test-fixtures/adminAuth.js'
 
 vi.mock('../schemas/env.js', () => ({
   env: { MANUAL_ADMIN_SECRET: 'test-secret' },
@@ -25,7 +26,7 @@ const platformKey = Keypair.random()
 const subject = Keypair.random().publicKey()
 const DRAIN_HASH = 'ab'.repeat(32)
 
-const secret = { 'x-admin-secret': 'test-secret' }
+const secret = adminAuthHeader
 
 function build(withMultisig: boolean) {
   StubSorobanAdapter._testOnlyReset()
@@ -57,7 +58,8 @@ function build(withMultisig: boolean) {
 
 describe('covered admin operations without a multisig (#1972)', () => {
   let ctx: ReturnType<typeof build>
-  beforeEach(() => {
+  beforeEach(async () => {
+    await seedAdminSession()
     ctx = build(false)
   })
 
@@ -84,20 +86,21 @@ describe('covered admin operations without a multisig (#1972)', () => {
     expect(res.body.txHash).toBe('direct-role-hash')
   })
 
-  it('the contract-access routes respond (they used to hang) and still need the admin secret', async () => {
-    await request(ctx.app).post('/ca/propose-assign-role').send({ subject, role: 1 }).expect(403)
+  it('the contract-access routes respond (they used to hang) and still need an authenticated admin', async () => {
+    await request(ctx.app).post('/ca/propose-assign-role').send({ subject, role: 1 }).expect(401)
     await request(ctx.app)
       .post('/ca/propose-assign-role')
-      .set({ 'x-admin-secret': 'wrong' })
+      .set('Authorization', 'Bearer not-a-real-token')
       .send({ subject, role: 1 })
-      .expect(403)
+      .expect(401)
     expect(ctx.proposeAssignRole).not.toHaveBeenCalled()
   })
 })
 
 describe('covered admin operations with a multisig (#1972)', () => {
   let ctx: ReturnType<typeof build>
-  beforeEach(() => {
+  beforeEach(async () => {
+    await seedAdminSession()
     ctx = build(true)
   })
 
@@ -164,8 +167,8 @@ describe('covered admin operations with a multisig (#1972)', () => {
     expect(await ctx.adapter.multisigListProposals()).toEqual([])
   })
 
-  it('still requires the admin secret', async () => {
-    await request(ctx.app).post('/cb/propose-drain').send({ destination: subject, drainHash: DRAIN_HASH }).expect(403)
+  it('still requires an authenticated admin', async () => {
+    await request(ctx.app).post('/cb/propose-drain').send({ destination: subject, drainHash: DRAIN_HASH }).expect(401)
     expect(await ctx.adapter.multisigListProposals()).toEqual([])
   })
 
