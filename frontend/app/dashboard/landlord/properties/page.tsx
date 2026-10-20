@@ -49,6 +49,7 @@ import {
 } from "@/lib/landlordPropertiesApi";
 import { showSuccessToast, showErrorToast } from "@/lib/toast";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 
 function formatLocation(property: LandlordPropertyRecord): string {
   const parts = [property.area, property.city].filter(Boolean);
@@ -77,6 +78,8 @@ function statusPresentation(status: LandlordPropertyStatus): {
 }
 
 export default function LandlordPropertiesPage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [properties, setProperties] = useState<LandlordPropertyRecord[]>([]);
@@ -164,7 +167,7 @@ export default function LandlordPropertiesPage() {
     <div className="min-h-screen bg-background">
       <DashboardSidebar
         role="landlord"
-        userInfo={{ name: "Chief Okonkwo", roleLabel: "Landlord" }}
+        userInfo={{ name: userName, roleLabel: "Landlord" }}
       />
 
       <main id="main-content" className="lg:ml-64 min-h-screen pt-20">

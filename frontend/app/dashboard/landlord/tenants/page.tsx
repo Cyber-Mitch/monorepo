@@ -15,9 +15,12 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { landlordApi, type LandlordTenant } from "@/lib/landlordApi";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 import { formatDate } from "@/lib/date";
 
 export default function TenantsPage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const [tenants, setTenants] = useState<LandlordTenant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +62,7 @@ export default function TenantsPage() {
     <div className="min-h-screen bg-background">
       <DashboardSidebar
         role="landlord"
-        userInfo={{ name: "Chief Okonkwo", roleLabel: "Landlord" }}
+        userInfo={{ name: userName, roleLabel: "Landlord" }}
       />
 
       <main id="main-content" className="min-h-screen w-full pt-20 lg:ml-64">

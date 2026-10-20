@@ -25,8 +25,11 @@ import {
 } from "@/lib/landlordPropertiesApi";
 import { showSuccessToast, showErrorToast } from "@/lib/toast";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
+import useAuthStore from "@/store/useAuthStore";
 
 export default function PropertyApplicationsPage() {
+  const user = useAuthStore((state) => state.user);
+  const userName = user?.name ?? user?.email ?? "User";
   const params = useParams();
   const propertyId = params.id as string;
 
@@ -107,7 +110,7 @@ export default function PropertyApplicationsPage() {
     <div className="min-h-screen bg-background">
       <DashboardSidebar
         role="landlord"
-        userInfo={{ name: "Chief Okonkwo", roleLabel: "Landlord" }}
+        userInfo={{ name: userName, roleLabel: "Landlord" }}
       />
 
       <main id="main-content" className="lg:ml-64 min-h-screen pt-20">
