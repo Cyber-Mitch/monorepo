@@ -25,23 +25,32 @@
 //! PROPTEST_CASES=10000 cargo test --package deal_escrow proptest
 //! ```
 
-extern crate std;
 extern crate alloc;
+extern crate std;
 
 use alloc::vec::Vec;
 
-use crate::{DealEscrow, DealEscrowClient, DataKey};
+use crate::{DataKey, DealEscrow, DealEscrowClient};
+use proptest::prelude::*;
 use soroban_sdk::{
-    testutils::{Address as _, MockAuth, MockAuthInvoke, Ledger as _},
-    token::StellarAssetClient,
+    testutils::{Address as _, Ledger as _, MockAuth, MockAuthInvoke},
     token::Client as TokenClient,
+    token::StellarAssetClient,
     Address, BytesN, Env, IntoVal, String, Symbol,
 };
-use proptest::prelude::*;
 
 // ── Test Helpers ─────────────────────────────────────────────────────────────
 
-fn setup_contract(env: &Env) -> (Address, Address, Address, Address, Address, DealEscrowClient) {
+fn setup_contract(
+    env: &Env,
+) -> (
+    Address,
+    Address,
+    Address,
+    Address,
+    Address,
+    DealEscrowClient,
+) {
     env.mock_all_auths();
     let contract_id = env.register(DealEscrow, ());
     let client = DealEscrowClient::new(env, &contract_id);
@@ -69,7 +78,14 @@ fn setup_contract(env: &Env) -> (Address, Address, Address, Address, Address, De
         .unwrap()
         .unwrap();
 
-    (admin, operator, token_contract_id, token_admin, receipt_contract, client)
+    (
+        admin,
+        operator,
+        token_contract_id,
+        token_admin,
+        receipt_contract,
+        client,
+    )
 }
 
 fn get_token_balance(env: &Env, token: &Address, addr: &Address) -> i128 {
