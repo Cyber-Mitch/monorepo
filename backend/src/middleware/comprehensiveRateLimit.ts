@@ -221,8 +221,8 @@ export function getRateLimitStats(): {
   }
 }
 
-export function resetRateLimitStore(): void {
+export async function resetRateLimitStore(): Promise<void> {
   customEndpointLimits.clear()
-  abuseEventStore.clear()
+  await abuseEventStore.clear()
   slidingWindowLimiter.clear()
 }
