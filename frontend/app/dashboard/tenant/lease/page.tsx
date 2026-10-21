@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Loader2,
   FileSignature,
+  TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,6 +28,7 @@ import { DashboardHeader } from "@/components/dashboard-header";
 import { formatDate } from "@/lib/date";
 import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import useAuthStore from "@/store/useAuthStore";
+import { useFeatureFlag } from "@/lib/featureFlags";
 import { LeaseESignature } from "@/components/properties/LeaseESignature";
 import {
   searchEmployers,
@@ -138,6 +140,7 @@ function DocPreviewModal({ doc, onClose }: DocPreviewModalProps) {
 export default function TenantLeasePage() {
   const user = useAuthStore((state) => state.user);
   const userName = user?.name ?? user?.email ?? "User";
+  const isRentToOwnEnabled = useFeatureFlag("RENT_TO_OWN_ENABLED");
   const [leaseDetails, setLeaseDetails] = useState<TenantLeaseDetails | null>(
     null,
   );
@@ -296,14 +299,26 @@ export default function TenantLeasePage() {
 
       <main id="main-content" className="lg:ml-64 min-h-screen pt-20">
         <div className="p-8">
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-foreground">My Lease</h1>
               <p className="mt-1 text-muted-foreground">
                 View your lease details and documents
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {isRentToOwnEnabled ? (
+                <Button
+                  asChild
+                  variant="outline"
+                  className="border-3 border-foreground bg-background font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]"
+                >
+                  <Link href={`/dashboard/tenant/rent-to-own/${encodeURIComponent(dealId)}`}>
+                    <TrendingUp className="mr-2 h-5 w-5" aria-hidden="true" />
+                    View Equity
+                  </Link>
+                </Button>
+              ) : null}
               <Button
                 onClick={() => setIsSigningOpen(true)}
                 className="border-3 border-foreground bg-primary font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]"
