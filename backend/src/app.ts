@@ -299,6 +299,10 @@ import { createAdminRolesRouter } from "./routes/adminRoles.js";
 import { createSorobanContractsRouter } from "./routes/sorobanContracts.js";
 import { createContractEventsRouter } from "./routes/contractEvents.js";
 import { createWhistleblowerRewardsRouter } from "./routes/whistleblowerRewards.js";
+import {
+  initSigningKeyMaterialStore,
+  PostgresSigningKeyMaterialStore,
+} from "./models/signingKeyMaterialStore.js";
 import { createCircuitBreakerRouter } from "./routes/circuitBreaker.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
@@ -691,6 +695,8 @@ export function createApp() {
   // Tenant Application Store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
     initTenantApplicationStore(new PostgresTenantApplicationStore());
+    // Rotated signing keys are encrypted at rest with the wallet encryption service (#1941).
+    initSigningKeyMaterialStore(new PostgresSigningKeyMaterialStore(encryptionService));
     // NGN ledger and withdrawals persist together (#1944).
     initNgnWalletStore(new PostgresNgnWalletStore());
     initNgnWithdrawalStore(new PostgresNgnWithdrawalStore());

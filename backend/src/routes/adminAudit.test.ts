@@ -7,25 +7,33 @@ import { createAdminAuditRouter } from './adminAudit.js'
 /**
  * Tests for GET /api/admin/audit and GET /api/admin/audit/verify.
  *
- * Mounts the router directly on a minimal Express app, with MANUAL_ADMIN_SECRET
- * mocked so the admin-secret guard (backend/src/middleware/adminSecret.ts) is
- * exercised the same way it is in production — every request below sends the
- * matching x-admin-secret header. Focuses on the business logic: search,
- * filter forwarding, pagination, and chain verification responses.
+ * Mounts the router directly on a minimal Express app. authenticateToken is
+ * stubbed: a request with the admin bearer token is signed in as an admin, and
+ * one without it is rejected as unauthenticated. requirePermission runs for real
+ * and, with no database, falls back to the admin role. Focuses on the business
+ * logic: search, filter forwarding, pagination, and chain verification responses.
  */
 
-const { mockSearch, mockVerifyChain, mockAppend, ADMIN_SECRET } = vi.hoisted(() => ({
+const { mockSearch, mockVerifyChain, mockAppend } = vi.hoisted(() => ({
   mockSearch: vi.fn(),
   mockVerifyChain: vi.fn(),
   mockAppend: vi.fn(),
-  ADMIN_SECRET: 'test-admin-secret',
 }))
 
-vi.mock('../schemas/env.js', () => ({
-  env: {
-    MANUAL_ADMIN_SECRET: ADMIN_SECRET,
-  },
-}))
+vi.mock('../middleware/auth.js', async () => {
+  const { AppError } = await import('../errors/AppError.js')
+  const { ErrorCode } = await import('../errors/errorCodes.js')
+  return {
+    authenticateToken: (req: any, _res: any, next: any) => {
+      if (req.headers.authorization !== 'Bearer admin-token') {
+        next(new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication token required'))
+        return
+      }
+      req.user = { id: 'admin-1', role: 'admin' }
+      next()
+    },
+  }
+})
 
 vi.mock('../repositories/AuditRepository.js', () => ({
   AuditRepository: vi.fn().mockImplementation(() => ({
@@ -90,7 +98,7 @@ describe('Admin Audit Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/admin/audit')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(res.body.entries).toHaveLength(1)
@@ -104,7 +112,7 @@ describe('Admin Audit Routes', () => {
 
       await request(buildApp())
         .get('/api/admin/audit?eventType=AUTH_LOGOUT&userId=user-42&page=2&pageSize=10')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
         .expect(200)
 
       expect(mockSearch).toHaveBeenCalledWith(
@@ -117,7 +125,7 @@ describe('Admin Audit Routes', () => {
 
       await request(buildApp())
         .get('/api/admin/audit?dateFrom=2026-01-01T00:00:00.000Z&dateTo=2026-01-31T23:59:59.999Z')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
         .expect(200)
 
       expect(mockSearch).toHaveBeenCalledWith(
@@ -131,7 +139,7 @@ describe('Admin Audit Routes', () => {
     it('returns 400 for invalid pageSize', async () => {
       const res = await request(buildApp())
         .get('/api/admin/audit?pageSize=9999')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
       expect(res.status).toBe(400)
     })
 
@@ -140,15 +148,15 @@ describe('Admin Audit Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/admin/audit')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
       expect(res.status).toBe(200)
       expect(res.body.entries).toHaveLength(0)
       expect(res.body.pagination.total).toBe(0)
     })
 
-    it('rejects the request when no x-admin-secret header is sent', async () => {
+    it('rejects the request when no bearer token is sent', async () => {
       const res = await request(buildApp()).get('/api/admin/audit')
-      expect(res.status).toBe(403)
+      expect(res.status).toBe(401)
       expect(mockSearch).not.toHaveBeenCalled()
     })
   })
@@ -159,7 +167,7 @@ describe('Admin Audit Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/admin/audit/verify')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(res.body.valid).toBe(true)
@@ -177,7 +185,7 @@ describe('Admin Audit Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/admin/audit/verify')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(409)
       expect(res.body.valid).toBe(false)
@@ -190,7 +198,7 @@ describe('Admin Audit Routes', () => {
 
       await request(buildApp())
         .get('/api/admin/audit/verify')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
         .expect(200)
 
       expect(mockVerifyChain).toHaveBeenCalledWith(1000)
@@ -201,7 +209,7 @@ describe('Admin Audit Routes', () => {
 
       await request(buildApp())
         .get('/api/admin/audit/verify?limit=500')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
         .expect(200)
 
       expect(mockVerifyChain).toHaveBeenCalledWith(500)
@@ -210,13 +218,13 @@ describe('Admin Audit Routes', () => {
     it('returns 400 for limit exceeding max', async () => {
       const res = await request(buildApp())
         .get('/api/admin/audit/verify?limit=99999')
-        .set('x-admin-secret', ADMIN_SECRET)
+        .set('Authorization', 'Bearer admin-token')
       expect(res.status).toBe(400)
     })
 
-    it('rejects the request when no x-admin-secret header is sent', async () => {
+    it('rejects the request when no bearer token is sent', async () => {
       const res = await request(buildApp()).get('/api/admin/audit/verify')
-      expect(res.status).toBe(403)
+      expect(res.status).toBe(401)
       expect(mockVerifyChain).not.toHaveBeenCalled()
     })
   })

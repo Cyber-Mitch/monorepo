@@ -3,15 +3,18 @@
  *
  * GET  /api/admin/audit         — search audit log with filters + pagination
  * GET  /api/admin/audit/verify  — verify the hash-chain integrity
+ *
+ * Both routes need a signed-in admin holding audit:view (#1940).
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
-import { assertAdminSecret } from '../middleware/adminSecret.js'
+import { authenticateToken } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { auditRepository } from '../repositories/AuditRepository.js'
-import type { AuditEventType, ActorType } from '../utils/auditLogger.js'
+import { auditLog, extractAuditContext, type AuditEventType, type ActorType } from '../utils/auditLogger.js'
 
 const auditSearchQuerySchema = z.object({
   eventType: z.string().optional(),
@@ -44,55 +47,74 @@ export function createAdminAuditRouter() {
    *   page        — page number (default 1)
    *   pageSize    — entries per page (default 50, max 200)
    */
-  router.get('/audit', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      assertAdminSecret(req)
+  router.get(
+    '/audit',
+    authenticateToken,
+    requirePermission('audit', 'view'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const parsed = auditSearchQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            parsed.error.errors.map((e) => e.message).join('; '),
+          )
+        }
 
-      const parsed = auditSearchQuerySchema.safeParse(req.query)
-      if (!parsed.success) {
-        throw new AppError(
-          ErrorCode.VALIDATION_ERROR,
-          400,
-          parsed.error.errors.map((e) => e.message).join('; '),
-        )
+        const q = parsed.data
+
+        // Record who searched what, so every read of the audit log is attributable.
+        auditLog('ADMIN_AUDIT_LOG_VIEWED', extractAuditContext(req, 'admin'), {
+          source: 'admin_audit_search',
+          filters: {
+            eventType: q.eventType,
+            actorType: q.actorType,
+            userId: q.userId,
+            requestId: q.requestId,
+            dateFrom: q.dateFrom,
+            dateTo: q.dateTo,
+          },
+          page: q.page,
+          pageSize: q.pageSize,
+        })
+
+        const result = await auditRepository.search({
+          eventType: q.eventType as AuditEventType | undefined,
+          actorType: q.actorType as ActorType | undefined,
+          userId: q.userId,
+          requestId: q.requestId,
+          dateFrom: q.dateFrom ? new Date(q.dateFrom) : undefined,
+          dateTo: q.dateTo ? new Date(q.dateTo) : undefined,
+          page: q.page,
+          pageSize: q.pageSize,
+        })
+
+        res.json({
+          entries: result.entries.map((e) => ({
+            id: e.id,
+            eventType: e.eventType,
+            actorType: e.actorType,
+            userId: e.userId,
+            requestId: e.requestId,
+            ipAddress: e.ipAddress,
+            httpMethod: e.httpMethod,
+            httpPath: e.httpPath,
+            metadata: e.metadata,
+            createdAt: e.createdAt.toISOString(),
+          })),
+          pagination: {
+            total: result.total,
+            page: result.page,
+            pageSize: result.pageSize,
+            totalPages: result.totalPages,
+          },
+        })
+      } catch (error) {
+        next(error)
       }
-
-      const q = parsed.data
-      const result = await auditRepository.search({
-        eventType: q.eventType as AuditEventType | undefined,
-        actorType: q.actorType as ActorType | undefined,
-        userId: q.userId,
-        requestId: q.requestId,
-        dateFrom: q.dateFrom ? new Date(q.dateFrom) : undefined,
-        dateTo: q.dateTo ? new Date(q.dateTo) : undefined,
-        page: q.page,
-        pageSize: q.pageSize,
-      })
-
-      res.json({
-        entries: result.entries.map((e) => ({
-          id: e.id,
-          eventType: e.eventType,
-          actorType: e.actorType,
-          userId: e.userId,
-          requestId: e.requestId,
-          ipAddress: e.ipAddress,
-          httpMethod: e.httpMethod,
-          httpPath: e.httpPath,
-          metadata: e.metadata,
-          createdAt: e.createdAt.toISOString(),
-        })),
-        pagination: {
-          total: result.total,
-          page: result.page,
-          pageSize: result.pageSize,
-          totalPages: result.totalPages,
-        },
-      })
-    } catch (error) {
-      next(error)
-    }
-  })
+    },
+  )
 
   /**
    * GET /api/admin/audit/verify
@@ -102,31 +124,34 @@ export function createAdminAuditRouter() {
    * Query params:
    *   limit — max rows to verify (default 1000, max 10000)
    */
-  router.get('/audit/verify', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      assertAdminSecret(req)
+  router.get(
+    '/audit/verify',
+    authenticateToken,
+    requirePermission('audit', 'view'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const parsed = verifyQuerySchema.safeParse(req.query)
+        if (!parsed.success) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            parsed.error.errors.map((e) => e.message).join('; '),
+          )
+        }
 
-      const parsed = verifyQuerySchema.safeParse(req.query)
-      if (!parsed.success) {
-        throw new AppError(
-          ErrorCode.VALIDATION_ERROR,
-          400,
-          parsed.error.errors.map((e) => e.message).join('; '),
-        )
+        const result = await auditRepository.verifyChain(parsed.data.limit)
+
+        res.status(result.valid ? 200 : 409).json({
+          valid: result.valid,
+          checkedCount: result.checkedCount,
+          firstBrokenId: result.firstBrokenId,
+          error: result.error,
+        })
+      } catch (error) {
+        next(error)
       }
-
-      const result = await auditRepository.verifyChain(parsed.data.limit)
-
-      res.status(result.valid ? 200 : 409).json({
-        valid: result.valid,
-        checkedCount: result.checkedCount,
-        firstBrokenId: result.firstBrokenId,
-        error: result.error,
-      })
-    } catch (error) {
-      next(error)
-    }
-  })
+    },
+  )
 
   return router
 }

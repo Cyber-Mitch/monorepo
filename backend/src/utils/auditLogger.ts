@@ -169,6 +169,12 @@ export type AuditEventType =
   | 'STATE_DELETED'
   // Admin operations (auto-generated)
   | 'ADMIN_OPERATION'
+  // Admin RBAC-guarded configuration and audit-log access (#1934, #1936, #1940)
+  | 'ADMIN_UNDERWRITING_CONFIG_UPDATED'
+  | 'ADMIN_QUOTA_OVERRIDE_CREATED'
+  | 'ADMIN_QUOTA_OVERRIDE_REMOVED'
+  | 'ADMIN_QUOTA_RESET'
+  | 'ADMIN_AUDIT_LOG_VIEWED'
 
 /**
  * Valid actor types

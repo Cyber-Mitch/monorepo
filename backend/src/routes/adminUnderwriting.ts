@@ -1,19 +1,24 @@
 /**
  * Admin Underwriting Routes
  * Internal admin endpoint for reviewing underwriting decisions and rationale
+ *
+ * Reads need underwriting:view. Changing the rule config and re-running an
+ * evaluation need underwriting:manage (#1934).
  */
 
-import { Router, Request, Response } from "express";
+import { Router, Response } from "express";
 import {
   authenticateToken,
   type AuthenticatedRequest,
 } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { underwritingDecisionTraceStore } from "../models/underwritingDecisionTraceStore.js";
 import { underwritingService } from "../services/underwritingService.js";
 import { tenantApplicationStore } from "../models/tenantApplicationStore.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
+import { auditLog, extractAuditContext } from "../utils/auditLogger.js";
 import {
   evaluateApplicationBodySchema,
   updateRuleConfigBodySchema,
@@ -30,6 +35,7 @@ const router = Router();
 router.get(
   "/decisions",
   authenticateToken,
+  requirePermission("underwriting", "view"),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       const decision = req.query.decision as string;
@@ -70,6 +76,7 @@ router.get(
 router.get(
   "/decisions/:traceId",
   authenticateToken,
+  requirePermission("underwriting", "view"),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       const { traceId } = req.params;
@@ -111,6 +118,7 @@ router.get(
 router.get(
   "/decisions/application/:applicationId",
   authenticateToken,
+  requirePermission("underwriting", "view"),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       const { applicationId } = req.params;
@@ -145,6 +153,7 @@ router.get(
 router.get(
   "/decisions/user/:userId",
   authenticateToken,
+  requirePermission("underwriting", "view"),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       const { userId } = req.params;
@@ -178,6 +187,7 @@ router.get(
 router.post(
   "/evaluate/:applicationId",
   authenticateToken,
+  requirePermission("underwriting", "manage"),
   validate(evaluateApplicationBodySchema),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
@@ -218,6 +228,7 @@ router.post(
 router.get(
   "/config",
   authenticateToken,
+  requirePermission("underwriting", "view"),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       const config = underwritingService.getRuleConfig();
@@ -234,21 +245,34 @@ router.get(
 
 /**
  * PUT /api/admin/underwriting/config
- * Update rule engine configuration
+ * Update rule engine configuration. Every change is audit-logged with the
+ * config as it was before and after the update.
  *
  * @authenticated
  */
 router.put(
   "/config",
   authenticateToken,
+  requirePermission("underwriting", "manage"),
   validate(updateRuleConfigBodySchema),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       const configUpdate = req.body;
 
+      const before = structuredClone(underwritingService.getRuleConfig());
+
       underwritingService.updateRuleConfig(configUpdate);
 
       const updatedConfig = underwritingService.getRuleConfig();
+
+      auditLog(
+        "ADMIN_UNDERWRITING_CONFIG_UPDATED",
+        extractAuditContext(req, "admin"),
+        {
+          before,
+          after: structuredClone(updatedConfig),
+        },
+      );
 
       res.json({
         success: true,

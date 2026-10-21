@@ -12,9 +12,24 @@ import request from 'supertest'
 import express, { type Express } from 'express'
 import { errorHandler } from '../middleware/errorHandler.js'
 import { createAdminUnderwritingRouter } from './adminUnderwriting.js'
+import { auditLog } from '../utils/auditLogger.js'
+
+// requirePermission falls back to the legacy role when there is no database, so the
+// permission check runs for real without one.
+vi.mock('../db.js', () => ({
+  getPool: vi.fn(async () => null),
+  setPool: vi.fn(),
+  getPoolMetrics: vi.fn(() => null),
+}))
+
+vi.mock('../utils/auditLogger.js', () => ({
+  auditLog: vi.fn(),
+  extractAuditContext: vi.fn(() => ({})),
+}))
 
 const authState = vi.hoisted(() => ({
   authenticated: true,
+  role: 'admin' as string,
 }))
 
 const serviceMock = vi.hoisted(() => ({
@@ -34,7 +49,7 @@ vi.mock('../middleware/auth.js', async (importOriginal) => {
         next(new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required'))
         return
       }
-      req.user = { id: 'admin-user', role: 'admin' }
+      req.user = { id: 'admin-user', role: authState.role }
       next()
     },
   }
@@ -72,6 +87,8 @@ function buildApp(): Express {
 describe('Admin Underwriting Routes - Validation', () => {
   beforeEach(() => {
     authState.authenticated = true
+    authState.role = 'admin'
+    vi.mocked(auditLog).mockClear()
     serviceMock.evaluateApplication.mockReset()
     serviceMock.getRuleConfig.mockReset()
     serviceMock.updateRuleConfig.mockReset()
@@ -530,6 +547,64 @@ describe('Admin Underwriting Routes - Validation', () => {
         .send({ approveThreshold: 80 })
 
       expect(res.status).toBe(401)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // RBAC (#1934)
+  // ---------------------------------------------------------------------------
+  describe('RBAC', () => {
+    it('forbids a user without underwriting:view from listing decisions', async () => {
+      authState.role = 'tenant'
+      const res = await request(buildApp()).get('/api/admin/underwriting/decisions')
+
+      expect(res.status).toBe(403)
+      expect(res.body.error.code).toBe('FORBIDDEN')
+    })
+
+    it('forbids a user without underwriting:view from reading the config', async () => {
+      authState.role = 'tenant'
+      const res = await request(buildApp()).get('/api/admin/underwriting/config')
+
+      expect(res.status).toBe(403)
+      expect(serviceMock.getRuleConfig).not.toHaveBeenCalled()
+    })
+
+    it('forbids a user without underwriting:manage from updating the config', async () => {
+      authState.role = 'tenant'
+      const res = await request(buildApp())
+        .put('/api/admin/underwriting/config')
+        .send({ approveThreshold: 80 })
+
+      expect(res.status).toBe(403)
+      expect(serviceMock.updateRuleConfig).not.toHaveBeenCalled()
+    })
+
+    it('forbids a user without underwriting:manage from re-running an evaluation', async () => {
+      authState.role = 'tenant'
+      const res = await request(buildApp())
+        .post('/api/admin/underwriting/evaluate/app-123')
+        .send({})
+
+      expect(res.status).toBe(403)
+      expect(serviceMock.evaluateApplication).not.toHaveBeenCalled()
+    })
+
+    it('audit-logs a config change with the config before and after', async () => {
+      serviceMock.getRuleConfig
+        .mockReturnValueOnce({ approveThreshold: 70 })
+        .mockReturnValueOnce({ approveThreshold: 80 })
+
+      const res = await request(buildApp())
+        .put('/api/admin/underwriting/config')
+        .send({ approveThreshold: 80 })
+
+      expect(res.status).toBe(200)
+      expect(auditLog).toHaveBeenCalledWith(
+        'ADMIN_UNDERWRITING_CONFIG_UPDATED',
+        expect.anything(),
+        { before: { approveThreshold: 70 }, after: { approveThreshold: 80 } },
+      )
     })
   })
 })

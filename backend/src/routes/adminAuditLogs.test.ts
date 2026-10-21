@@ -4,6 +4,7 @@ import express from 'express'
 import { errorHandler } from '../middleware/errorHandler.js'
 import { createAdminAuditLogsRouter } from './adminAuditLogs.js'
 import { auditLogRepository } from '../repositories/AuditLogRepository.js'
+import { auditLog } from '../utils/auditLogger.js'
 
 vi.mock('../repositories/AuditLogRepository.js', () => ({
   auditLogRepository: {
@@ -11,10 +12,37 @@ vi.mock('../repositories/AuditLogRepository.js', () => ({
   },
 }))
 
-vi.mock('../schemas/env.js', () => ({
-  env: {
-    MANUAL_ADMIN_SECRET: 'test-secret',
-  },
+vi.mock('../middleware/auth.js', async () => {
+  const { AppError } = await import('../errors/AppError.js')
+  const { ErrorCode } = await import('../errors/errorCodes.js')
+  return {
+    authenticateToken: (req: any, _res: any, next: any) => {
+      if (req.headers.authorization === 'Bearer admin-token') {
+        req.user = { id: 'admin-1', role: 'admin' }
+        next()
+        return
+      }
+      if (req.headers.authorization === 'Bearer tenant-token') {
+        req.user = { id: 'tenant-1', role: 'tenant' }
+        next()
+        return
+      }
+      next(new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication token required'))
+    },
+  }
+})
+
+// requirePermission falls back to the legacy role when there is no database, so the
+// permission check runs for real without one.
+vi.mock('../db.js', () => ({
+  getPool: vi.fn(async () => null),
+  setPool: vi.fn(),
+  getPoolMetrics: vi.fn(() => null),
+}))
+
+vi.mock('../utils/auditLogger.js', () => ({
+  auditLog: vi.fn(),
+  extractAuditContext: vi.fn(() => ({})),
 }))
 
 function buildApp() {
@@ -31,7 +59,7 @@ function buildApp() {
 
 describe('Admin Audit Logs Routes', () => {
   describe('GET /api/v1/admin/audit-logs', () => {
-    it('should list audit logs with valid admin secret', async () => {
+    it('should list audit logs for an admin with audit:view', async () => {
       vi.mocked(auditLogRepository.list).mockResolvedValue({
         entries: [
           {
@@ -55,7 +83,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(res.body.entries).toBeInstanceOf(Array)
@@ -98,7 +126,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?actorId=user-456')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(vi.mocked(auditLogRepository.list)).toHaveBeenCalledWith(
@@ -118,7 +146,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?action=USER_LOGIN')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(vi.mocked(auditLogRepository.list)).toHaveBeenCalledWith(
@@ -138,7 +166,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?resourceType=deal&resourceId=deal-123')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(vi.mocked(auditLogRepository.list)).toHaveBeenCalledWith(
@@ -161,7 +189,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get(`/api/v1/admin/audit-logs?startDate=${startDate}&endDate=${endDate}`)
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(vi.mocked(auditLogRepository.list)).toHaveBeenCalledWith(
@@ -184,7 +212,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?page=2&limit=25')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(vi.mocked(auditLogRepository.list)).toHaveBeenCalledWith(
@@ -202,7 +230,7 @@ describe('Admin Audit Logs Routes', () => {
     it('should validate limit parameter (max 200)', async () => {
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?limit=300')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
@@ -211,7 +239,7 @@ describe('Admin Audit Logs Routes', () => {
     it('should validate page parameter (must be positive)', async () => {
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?page=0')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
@@ -220,13 +248,13 @@ describe('Admin Audit Logs Routes', () => {
     it('should validate startDate format', async () => {
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?startDate=invalid-date')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
     })
 
-    it('should reject request without admin secret', async () => {
+    it('should reject request without a bearer token', async () => {
       vi.mocked(auditLogRepository.list).mockResolvedValue({
         entries: [],
         total: 0,
@@ -237,12 +265,11 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp()).get('/api/v1/admin/audit-logs')
 
-      expect(res.status).toBe(403)
-      expect(res.body.error.code).toBe('FORBIDDEN')
-      expect(res.body.error.message).toBe('Invalid admin secret')
+      expect(res.status).toBe(401)
+      expect(res.body.error.code).toBe('UNAUTHORIZED')
     })
 
-    it('should reject request with invalid admin secret', async () => {
+    it('should reject a signed-in user without audit:view', async () => {
       vi.mocked(auditLogRepository.list).mockResolvedValue({
         entries: [],
         total: 0,
@@ -253,10 +280,31 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs')
-        .set('x-admin-secret', 'wrong-secret')
+        .set('Authorization', 'Bearer tenant-token')
 
       expect(res.status).toBe(403)
       expect(res.body.error.code).toBe('FORBIDDEN')
+    })
+
+    it('should record who searched the audit log', async () => {
+      vi.mocked(auditLogRepository.list).mockResolvedValue({
+        entries: [],
+        total: 0,
+        page: 1,
+        limit: 50,
+        totalPages: 0,
+      })
+
+      const res = await request(buildApp())
+        .get('/api/v1/admin/audit-logs?actorId=user-123')
+        .set('Authorization', 'Bearer admin-token')
+
+      expect(res.status).toBe(200)
+      expect(auditLog).toHaveBeenCalledWith(
+        'ADMIN_AUDIT_LOG_VIEWED',
+        expect.anything(),
+        expect.objectContaining({ filters: expect.objectContaining({ actorId: 'user-123' }) }),
+      )
     })
 
     it('should return empty results when no logs match filters', async () => {
@@ -270,7 +318,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs?action=NONEXISTENT_ACTION')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(res.body.entries).toEqual([])
@@ -301,7 +349,7 @@ describe('Admin Audit Logs Routes', () => {
 
       const res = await request(buildApp())
         .get('/api/v1/admin/audit-logs')
-        .set('x-admin-secret', 'test-secret')
+        .set('Authorization', 'Bearer admin-token')
 
       expect(res.status).toBe(200)
       expect(res.body.entries[0]).toMatchObject({
