@@ -10,9 +10,13 @@ import {
   PaginatedListings,
 } from './listing.js'
 
+/** Maximum listings a whistleblower may report per calendar month. */
+export const MAX_REPORTS_PER_MONTH = 2
+
 interface ListingStorePort {
   create(input: CreateListingInput): Promise<Listing>
   getById(listingId: string): Promise<Listing | null>
+  listByWhistleblower(whistleblowerId: string): Promise<Listing[]>
   list(filters?: ListingFilters): Promise<PaginatedListings>
   search(filters?: ListingFilters): Promise<PaginatedListings>
   suggest(query: string): Promise<string[]>
@@ -63,6 +67,12 @@ class InMemoryListingStore implements ListingStorePort {
 
   async getById(listingId: string): Promise<Listing | null> {
     return this.listings.get(listingId) ?? null
+  }
+
+  async listByWhistleblower(whistleblowerId: string): Promise<Listing[]> {
+    return Array.from(this.listings.values())
+      .filter((l) => l.whistleblowerId === whistleblowerId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
   }
 
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
@@ -234,7 +244,7 @@ class InMemoryListingStore implements ListingStorePort {
       (date) => date.getMonth() === currentMonth && date.getFullYear() === currentYear,
     )
 
-    return reportsThisMonth.length >= 2
+    return reportsThisMonth.length >= MAX_REPORTS_PER_MONTH
   }
 
   async getMonthlyReportCount(whistleblowerId: string): Promise<number> {
@@ -377,6 +387,18 @@ class PostgresListingStore implements ListingStorePort {
 
     if (rows.length === 0) return null
     return this.mapRow(rows[0] as ListingRow)
+  }
+
+  async listByWhistleblower(whistleblowerId: string): Promise<Listing[]> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `SELECT * FROM whistleblower_listings
+       WHERE whistleblower_id = $1 AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [whistleblowerId],
+    )
+
+    return (rows as ListingRow[]).map((row) => this.mapRow(row))
   }
 
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
@@ -627,7 +649,7 @@ class PostgresListingStore implements ListingStorePort {
 
   async hasReachedMonthlyLimit(whistleblowerId: string): Promise<boolean> {
     const count = await this.getMonthlyReportCount(whistleblowerId)
-    return count >= 2
+    return count >= MAX_REPORTS_PER_MONTH
   }
 
   async getMonthlyReportCount(whistleblowerId: string): Promise<number> {
@@ -755,6 +777,11 @@ class HybridListingStore implements ListingStorePort {
   async getById(listingId: string): Promise<Listing | null> {
     const adapter = await this.adapter()
     return adapter.getById(listingId)
+  }
+
+  async listByWhistleblower(whistleblowerId: string): Promise<Listing[]> {
+    const adapter = await this.adapter()
+    return adapter.listByWhistleblower(whistleblowerId)
   }
 
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
