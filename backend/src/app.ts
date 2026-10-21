@@ -186,6 +186,11 @@ import {
   initTenantRatingStore,
 } from "./models/tenantRatingStore.js";
 import {
+  PostgresTenantReputationStore,
+  initTenantReputationStore,
+} from "./models/tenantReputationStore.js";
+import { createTenantReputationAdminRouter } from "./routes/tenantReputation.js";
+import {
   createInspectorJobsRouter,
   createAdminInspectionJobsRouter,
 } from "./routes/inspectionJobs.js";
@@ -721,6 +726,7 @@ export function createApp() {
     initPropertyInspectionStore(new PostgresPropertyInspectionStore());
     initInspectorProfileStore(new PostgresInspectorProfileStore());
     initTenantRatingStore(new PostgresTenantRatingStore());
+    initTenantReputationStore(new PostgresTenantReputationStore());
     initInspectionJobStore(new PostgresInspectionJobStore());
   }
 
@@ -1127,6 +1133,7 @@ export function createApp() {
     app.use("/api/deals", createLandlordTenantRatingRouter());
     app.use("/api/tenant/rating-card", createTenantRatingCardRouter());
     app.use("/api/public/rating-card", createPublicRatingCardRouter());
+    app.use("/api/admin/reputation", createTenantReputationAdminRouter());
   }
 
   app.use("/api/v1/wallet", createWalletRouter(walletService));
@@ -1258,6 +1265,7 @@ export function createApp() {
   app.use("/api/v1/tenant/documents", createTenantDocumentsRouter());
   app.use("/api/v1/tenant/rating-card", createTenantRatingCardRouter());
   app.use("/api/v1/public/rating-card", createPublicRatingCardRouter());
+  app.use("/api/v1/admin/reputation", createTenantReputationAdminRouter());
   app.use("/api/v1/messaging", createMessagingRouter());
   app.use(
     "/api/v1/whistleblower/applications",
