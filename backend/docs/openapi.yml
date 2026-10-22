@@ -3239,6 +3239,301 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/admin/fraud/assessments:
+    get:
+      summary: List fraud assessments
+      description: |
+        Returns fraud assessments newest first, with optional filtering by risk
+        level, decision (action taken), and date range. Supports page-based
+        pagination via `page` and `pageSize` (or legacy `limit`/`offset`).
+      operationId: listFraudAssessments
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: riskLevel
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: decision
+          in: query
+          description: Filter by the action taken during assessment
+          schema:
+            type: string
+            enum: [none, hold, block, review_queue]
+        - name: from
+          in: query
+          description: Only assessments assessed at or after this ISO 8601 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Only assessments assessed at or before this ISO 8601 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: A page of fraud assessments
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - assessments
+                properties:
+                  assessments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        entityType:
+                          type: string
+                          enum: [account, payment, transaction]
+                        entityId:
+                          type: string
+                        totalScore:
+                          type: integer
+                        riskLevel:
+                          type: string
+                          enum: [low, medium, high, critical]
+                        actionTaken:
+                          type: string
+                          enum: [none, hold, block, review_queue]
+                          nullable: true
+                        signalMatches:
+                          type: array
+                          items:
+                            type: object
+                        context:
+                          type: object
+                        assessedAt:
+                          type: string
+                          format: date-time
+                        createdAt:
+                          type: string
+                          format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/fraud/holds:
+    get:
+      summary: List fraud account holds
+      description: |
+        Returns account holds for the fraud review queue, newest first.
+        Filter by `status` (`active` or `released`) and paginate with `page`
+        and `pageSize` (or legacy `limit`/`offset`).
+      operationId: listFraudHolds
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, released]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: A page of account holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - holds
+                properties:
+                  holds:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        accountId:
+                          type: string
+                        assessmentId:
+                          type: string
+                        holdType:
+                          type: string
+                          enum: [full, partial, transaction_limit]
+                        holdReason:
+                          type: string
+                        releasedAt:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        releasedBy:
+                          type: string
+                          nullable: true
+                        releaseReason:
+                          type: string
+                          nullable: true
+                        createdAt:
+                          type: string
+                          format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/fraud/holds/{id}/release:
+    post:
+      summary: Release a fraud account hold
+      description: |
+        Releases an active hold, recording the acting admin and the reason.
+        The operation is audit-logged and the affected user is notified.
+      operationId: releaseFraudHold
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                  description: The reason for releasing the hold
+                  example: "Cleared after manual review"
+      responses:
+        '200':
+          description: Hold released successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - hold
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  hold:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      accountId:
+                        type: string
+                      assessmentId:
+                        type: string
+                      holdType:
+                        type: string
+                        enum: [full, partial, transaction_limit]
+                      holdReason:
+                        type: string
+                      releasedAt:
+                        type: string
+                        format: date-time
+                      releasedBy:
+                        type: string
+                      releaseReason:
+                        type: string
+                      createdAt:
+                        type: string
+                        format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Hold not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Hold already released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/staking/stake:
     post:
       summary: Stake USDC tokens
