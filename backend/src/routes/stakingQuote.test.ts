@@ -46,13 +46,13 @@ async function createTestQuote(
 
 async function attemptDeposit(
   app: any,
-  userId: string,
+  authToken: string,
   quoteId: string,
   options: TestDepositOptions = {}
 ) {
   return request(app)
     .post('/api/staking/deposit/initiate')
-    .set('x-user-id', userId)
+    .set('Authorization', `Bearer ${authToken}`)
     .set('x-amount-ngn', '160000')
     .send({
       quoteId,
@@ -64,7 +64,6 @@ async function attemptDeposit(
 describe('Staking Quote API', () => {
   let app: any
   let authToken: string
-  let userId: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -73,8 +72,7 @@ describe('Staking Quote API', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'quote-test@example.com'
-    const user = await userStore.getOrCreateByEmail(email)
-    userId = user.id
+    await userStore.getOrCreateByEmail(email)
     authToken = 'test-token-quote'
     await sessionStore.create(email, authToken)
   })
@@ -94,14 +92,14 @@ describe('Staking Quote API', () => {
     const quoteId = q.body.quoteId
     const init1 = await request(app)
       .post('/api/staking/deposit/initiate')
-      .set('x-user-id', userId)
+      .set('Authorization', `Bearer ${authToken}`)
       .set('x-amount-ngn', '160000')
       .send({ quoteId, paymentRail: 'manual_admin' })
       .expect(201)
     expect(init1.body.success).toBe(true)
     await request(app)
       .post('/api/staking/deposit/initiate')
-      .set('x-user-id', userId)
+      .set('Authorization', `Bearer ${authToken}`)
       .set('x-amount-ngn', '160000')
       .send({ quoteId, paymentRail: 'manual_admin' })
       .expect(409)
@@ -117,13 +115,13 @@ describe('Staking Quote API', () => {
     await quoteStore.markExpired(quoteId)
     await request(app)
       .post('/api/staking/deposit/initiate')
-      .set('x-user-id', userId)
+      .set('Authorization', `Bearer ${authToken}`)
       .set('x-amount-ngn', '160000')
       .send({ quoteId, paymentRail: 'manual_admin' })
       .expect(409)
   })
 
-  it('rejects missing x-user-id header for deposit initiation', async () => {
+  it('rejects deposit initiation without a session, even when x-user-id is sent', async () => {
     const q = await request(app)
       .post('/api/staking/quote')
       .set('Authorization', `Bearer ${authToken}`)
@@ -132,37 +130,18 @@ describe('Staking Quote API', () => {
 
     const response = await request(app)
       .post('/api/staking/deposit/initiate')
+      .set('x-user-id', 'spoofed-user')
       .set('x-amount-ngn', '160000')
       .send({ quoteId: q.body.quoteId, paymentRail: 'manual_admin' })
-      .expect(400)
+      .expect(401)
 
-    expect(response.body.error?.message).toBe('Missing x-user-id header')
-  })
-
-  it('rejects invalid x-user-id header for deposit initiation', async () => {
-    const q = await request(app)
-      .post('/api/staking/quote')
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({ amountNgn: 160000, paymentRail: 'manual_admin' })
-      .expect(201)
-
-    const response = await request(app)
-      .post('/api/staking/deposit/initiate')
-      .set('x-user-id', 'bad user id!')
-      .set('x-amount-ngn', '160000')
-      .send({ quoteId: q.body.quoteId, paymentRail: 'manual_admin' })
-      .expect(400)
-
-    expect(response.body.error?.message).toBe(
-      'Invalid x-user-id header: expected 3-128 chars of letters, numbers, underscore, or hyphen'
-    )
+    expect(response.body.error?.code).toBe('UNAUTHORIZED')
   })
 })
 
 describe('Quote Expiry - Time-Based Rejection', () => {
   let app: any
   let authToken: string
-  let userId: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -171,8 +150,7 @@ describe('Quote Expiry - Time-Based Rejection', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'expiry-test@example.com'
-    const user = await userStore.getOrCreateByEmail(email)
-    userId = user.id
+    await userStore.getOrCreateByEmail(email)
     authToken = 'test-token-expiry'
     await sessionStore.create(email, authToken)
   })
@@ -193,7 +171,7 @@ describe('Quote Expiry - Time-Based Rejection', () => {
     vi.setSystemTime(startTime + 51)
 
     // Attempt deposit
-    const response = await attemptDeposit(app, userId, quoteId)
+    const response = await attemptDeposit(app, authToken, quoteId)
     expect(response.status).toBe(409)
 
     // Verify error message
@@ -208,7 +186,6 @@ describe('Quote Expiry - Time-Based Rejection', () => {
 describe('Quote Expiry - Status Transitions', () => {
   let app: any
   let authToken: string
-  let userId: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -217,8 +194,7 @@ describe('Quote Expiry - Status Transitions', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'status-test@example.com'
-    const user = await userStore.getOrCreateByEmail(email)
-    userId = user.id
+    await userStore.getOrCreateByEmail(email)
     authToken = 'test-token-status'
     await sessionStore.create(email, authToken)
   })
@@ -276,7 +252,6 @@ describe('Quote Expiry - Status Transitions', () => {
 describe('Quote Expiry - Reuse Prevention', () => {
   let app: any
   let authToken: string
-  let userId: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -285,8 +260,7 @@ describe('Quote Expiry - Reuse Prevention', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'reuse-test@example.com'
-    const user = await userStore.getOrCreateByEmail(email)
-    userId = user.id
+    await userStore.getOrCreateByEmail(email)
     authToken = 'test-token-reuse'
     await sessionStore.create(email, authToken)
   })
@@ -301,14 +275,14 @@ describe('Quote Expiry - Reuse Prevention', () => {
     await quoteStore.markExpired(quoteId)
 
     // Attempt deposit with expired quote
-    const response1 = await attemptDeposit(app, userId, quoteId)
+    const response1 = await attemptDeposit(app, authToken, quoteId)
     
     // Verify 409 rejection
     expect(response1.status).toBe(409)
     expect(response1.body.error?.message).toContain('expired')
 
     // Attempt second deposit with same quote
-    const response2 = await attemptDeposit(app, userId, quoteId)
+    const response2 = await attemptDeposit(app, authToken, quoteId)
     
     // Verify second attempt also rejected
     expect(response2.status).toBe(409)
@@ -318,7 +292,7 @@ describe('Quote Expiry - Reuse Prevention', () => {
   it('preserves used status when marking expired', async () => {
     // Create quote and use it successfully (deposit initiation)
     const { quoteId } = await createTestQuote(app, authToken)
-    const response = await attemptDeposit(app, userId, quoteId)
+    const response = await attemptDeposit(app, authToken, quoteId)
     expect(response.status).toBe(201)
 
     // Verify status is 'used'
@@ -337,7 +311,6 @@ describe('Quote Expiry - Reuse Prevention', () => {
 describe('Quote Expiry - Boundary Conditions', () => {
   let app: any
   let authToken: string
-  let userId: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -346,8 +319,7 @@ describe('Quote Expiry - Boundary Conditions', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'boundary-test@example.com'
-    const user = await userStore.getOrCreateByEmail(email)
-    userId = user.id
+    await userStore.getOrCreateByEmail(email)
     authToken = 'test-token-boundary'
     await sessionStore.create(email, authToken)
   })
@@ -373,7 +345,7 @@ describe('Quote Expiry - Boundary Conditions', () => {
     vi.setSystemTime(startTime + expiryMs + offsetMs)
 
     // Attempt deposit
-    const response = await attemptDeposit(app, userId, quoteId)
+    const response = await attemptDeposit(app, authToken, quoteId)
 
     // Verify expected status
     expect(response.status).toBe(expectedStatus)
@@ -391,7 +363,6 @@ describe('Quote Expiry - Boundary Conditions', () => {
 describe('Quote Expiry - Edge Cases', () => {
   let app: any
   let authToken: string
-  let userId: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -399,8 +370,7 @@ describe('Quote Expiry - Edge Cases', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'edge-case-test@example.com'
-    const user = await userStore.getOrCreateByEmail(email)
-    userId = user.id
+    await userStore.getOrCreateByEmail(email)
     authToken = 'test-token-edge-case'
     await sessionStore.create(email, authToken)
   })
@@ -425,7 +395,7 @@ describe('Quote Expiry - Edge Cases', () => {
     const { quoteId } = await createTestQuote(app, authToken)
 
     // No time advancement needed - quote should already be expired
-    const response = await attemptDeposit(app, userId, quoteId)
+    const response = await attemptDeposit(app, authToken, quoteId)
 
     // Verify quote is immediately expired and rejected with 409
     expect(response.status).toBe(409)
@@ -453,11 +423,11 @@ describe('Quote Expiry - Edge Cases', () => {
     // Advance time to 35ms - first quote should be expired, others active
     vi.setSystemTime(startTime + 35)
     
-    const response1 = await attemptDeposit(app, userId, quote1)
+    const response1 = await attemptDeposit(app, authToken, quote1)
     expect(response1.status).toBe(409)
     expect(response1.body.error?.message).toContain('expired')
 
-    const response2 = await attemptDeposit(app, userId, quote2)
+    const response2 = await attemptDeposit(app, authToken, quote2)
     expect(response2.status).toBe(201)
     expect(response2.body.success).toBe(true)
 
@@ -479,11 +449,11 @@ describe('Quote Expiry - Edge Cases', () => {
     // Advance time to 65ms - first two quotes should be expired, third active
     vi.setSystemTime(startTime + 65)
 
-    const response2b = await attemptDeposit(app, userId, quote2b)
+    const response2b = await attemptDeposit(app, authToken, quote2b)
     expect(response2b.status).toBe(409)
     expect(response2b.body.error?.message).toContain('expired')
 
-    const response3b = await attemptDeposit(app, userId, quote3b)
+    const response3b = await attemptDeposit(app, authToken, quote3b)
     expect(response3b.status).toBe(201)
     expect(response3b.body.success).toBe(true)
 
@@ -500,7 +470,7 @@ describe('Quote Expiry - Edge Cases', () => {
     // Advance time to 95ms - all three quotes should be expired
     vi.setSystemTime(startTime + 95)
 
-    const response3c = await attemptDeposit(app, userId, quote3c)
+    const response3c = await attemptDeposit(app, authToken, quote3c)
     expect(response3c.status).toBe(409)
     expect(response3c.body.error?.message).toContain('expired')
   })
@@ -519,7 +489,7 @@ describe('Quote Expiry - Edge Cases', () => {
     vi.setSystemTime(startTime + 5)
 
     // Verify request fails gracefully with expiry error
-    const response = await attemptDeposit(app, userId, quoteId)
+    const response = await attemptDeposit(app, authToken, quoteId)
     expect(response.status).toBe(409)
     expect(response.body.error?.message).toContain('expired')
   })

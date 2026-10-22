@@ -16,13 +16,18 @@ describe('POST /api/payments/confirm includes full-payment payout breakdown', ()
   it('returns payout breakdown and persists settlement ledger entries', async () => {
     const { createApp } = await import('../app.js')
     const { settlementLedgerStore } = await import('../models/settlementLedgerStore.js')
+    const { sessionStore, userStore } = await import('../models/authStore.js')
     const app = createApp()
 
-    // Create a deal (no listing linkage required for this test)
+    // Create a deal as its tenant (no listing linkage required for this test)
+    sessionStore.clear()
+    const tenant = await userStore.getOrCreateByEmail('fullpay-tenant@example.com')
+    await sessionStore.create(tenant.email, 'test-token-fullpay')
     const createDealRes = await request(app)
       .post('/api/deals')
+      .set('Authorization', 'Bearer test-token-fullpay')
       .send({
-        tenantId: 'tenant-1',
+        tenantId: tenant.id,
         landlordId: 'landlord-1',
         annualRentNgn: 1200000,
         depositNgn: 240000,

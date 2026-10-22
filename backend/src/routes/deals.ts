@@ -31,8 +31,32 @@ import { updateDealRepaymentSchema } from '../schemas/employer.js'
 import { durableApiIdempotency } from '../middleware/durableApiIdempotency.js'
 import { dealStateMachine } from '../services/deals/DealStateMachine.js'
 import { wouldExceedEquityCap } from '../services/deals/rentToOwnConversion.js'
+import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 
 const router = Router()
+
+
+function callerId(req: Request): string | undefined {
+  return (req as AuthenticatedRequest).user?.id
+}
+
+function isAdmin(req: Request): boolean {
+  const role = (req as AuthenticatedRequest).user?.role
+  return role === 'admin' || role === 'super_admin'
+}
+
+/** Loads a deal, then requires the caller to be its tenant, its landlord or an admin. */
+async function loadDealForParty(req: Request, dealId: string) {
+  const deal = await dealStore.findById(dealId)
+  if (!deal) {
+    throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
+  }
+  const userId = callerId(req)
+  if (!isAdmin(req) && userId !== deal.tenantId && userId !== deal.landlordId) {
+    throw new AppError(ErrorCode.FORBIDDEN, 403, 'You are not authorized to access this deal')
+  }
+  return deal
+}
 
 
 
@@ -48,11 +72,18 @@ const router = Router()
  * Approach: First atomically lock the listing (check availability + lock in one transaction),
  * then create the deal. If deal creation fails, the listing remains locked (caller must handle cleanup).
  */
-router.post('/', durableApiIdempotency(), async (req: Request, res: Response, next) => {
+router.post('/', authenticateToken, durableApiIdempotency(), async (req: Request, res: Response, next) => {
   try {
     const validatedData: CreateDealRequest = createDealSchema.parse(req.body)
 
-    const userId = req.headers['x-user-id'] || (req as any).user?.id
+    const userId = callerId(req)
+    if (!isAdmin(req) && userId !== validatedData.tenantId && userId !== validatedData.landlordId) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        403,
+        'You can only create a deal where you are the tenant or the landlord'
+      )
+    }
     if (userId && validatedData.listingId) {
       const flagged = await detectDuplicateDealSpam(String(userId), validatedData.listingId)
       if (flagged) {
@@ -115,7 +146,7 @@ router.post('/', durableApiIdempotency(), async (req: Request, res: Response, ne
  * GET /api/deals/:dealId/progress
  * Get a deal's payment progress computed from on-chain receipts
  */
-router.get('/:dealId/progress', async (req: Request, res: Response, next) => {
+router.get('/:dealId/progress', authenticateToken, async (req: Request, res: Response, next) => {
   try {
     const { dealId } = req.params
 
@@ -123,11 +154,7 @@ router.get('/:dealId/progress', async (req: Request, res: Response, next) => {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required')
     }
 
-    const deal = await dealStore.findById(dealId)
-
-    if (!deal) {
-      throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
-    }
+    const deal = await loadDealForParty(req, dealId)
 
     // Fetch all outbox items for this deal filtered to TENANT_REPAYMENT
     const receipts = await outboxStore.listByDealId(dealId, TxType.TENANT_REPAYMENT)
@@ -149,7 +176,7 @@ router.get('/:dealId/progress', async (req: Request, res: Response, next) => {
  * GET /api/deals/:dealId
  * Get a specific deal by ID with schedule
  */
-router.get('/:dealId', async (req: Request, res: Response, next) => {
+router.get('/:dealId', authenticateToken, async (req: Request, res: Response, next) => {
   try {
     const { dealId } = req.params
     
@@ -157,12 +184,8 @@ router.get('/:dealId', async (req: Request, res: Response, next) => {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required')
     }
     
-    const deal = await dealStore.findById(dealId)
-    
-    if (!deal) {
-      throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
-    }
-    
+    const deal = await loadDealForParty(req, dealId)
+
     res.json({
       success: true,
       data: deal
@@ -176,10 +199,20 @@ router.get('/:dealId', async (req: Request, res: Response, next) => {
  * GET /api/deals
  * Get deals with optional filtering
  */
-router.get('/', async (req: Request, res: Response, next) => {
+router.get('/', authenticateToken, async (req: Request, res: Response, next) => {
   try {
     const validatedFilters: DealFiltersRequest = dealFiltersSchema.parse(req.query)
-    
+
+    // Non-admins may only list deals they are party to, so they must filter by their own id.
+    const userId = callerId(req)
+    if (!isAdmin(req) && validatedFilters.tenantId !== userId && validatedFilters.landlordId !== userId) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        403,
+        'Filter deals by your own tenantId or landlordId'
+      )
+    }
+
     const result = await dealStore.findMany(validatedFilters)
     
     res.json({
@@ -198,7 +231,7 @@ router.get('/', async (req: Request, res: Response, next) => {
  * PATCH /api/deals/:dealId/status
  * Update deal status
  */
-router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
+router.patch('/:dealId/status', authenticateToken, async (req: Request, res: Response, next) => {
   const { dealId } = req.params
   
   if (!dealId) {
@@ -209,7 +242,8 @@ router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
     const validatedData: UpdateDealStatusRequest = updateDealStatusSchema.parse(req.body)
     const activationStart =
       validatedData.status === 'active' ? Date.now() : null
-    
+
+    await loadDealForParty(req, dealId)
     const deal = await dealStore.updateStatus(dealId, validatedData.status)
     
     if (!deal) {
@@ -299,7 +333,7 @@ router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
  * PATCH /api/deals/:dealId/schedule/:period
  * Update schedule item status
  */
-router.patch('/:dealId/schedule/:period', async (req: Request, res: Response, next) => {
+router.patch('/:dealId/schedule/:period', authenticateToken, async (req: Request, res: Response, next) => {
   const { dealId } = req.params
   const period = parseInt(req.params.period, 10)
   
@@ -313,12 +347,10 @@ router.patch('/:dealId/schedule/:period', async (req: Request, res: Response, ne
       period
     })
 
+    const existingDeal = await loadDealForParty(req, dealId)
+
     let targetItem: { period: number; amountNgn: number } | undefined
     if (validatedData.status === 'paid') {
-      const existingDeal = await dealStore.findById(dealId)
-      if (!existingDeal) {
-        throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
-      }
       targetItem = existingDeal.schedule.find((item) => item.period === validatedData.period)
       if (!targetItem) {
         throw new AppError(
@@ -368,13 +400,14 @@ router.patch('/:dealId/schedule/:period', async (req: Request, res: Response, ne
  * PATCH /api/deals/:dealId/repayment
  * Update repayment method and salary deduction linkage
  */
-router.patch('/:dealId/repayment', async (req: Request, res: Response, next) => {
+router.patch('/:dealId/repayment', authenticateToken, async (req: Request, res: Response, next) => {
   const { dealId } = req.params
   if (!dealId) {
     return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required'))
   }
   try {
     const body = updateDealRepaymentSchema.parse(req.body)
+    await loadDealForParty(req, dealId)
     await applyDealRepaymentMethod(dealId, body.repaymentMethod, {
       employerId: body.employerId,
       employeeId: body.employeeId,
@@ -395,27 +428,16 @@ router.patch('/:dealId/repayment', async (req: Request, res: Response, next) => 
  * Get repayment schedule for a deal
  * Authenticated; tenant or landlord of the deal can view
  */
-router.get('/:dealId/schedule', async (req: Request, res: Response, next) => {
+router.get('/:dealId/schedule', authenticateToken, async (req: Request, res: Response, next) => {
   try {
     const { dealId } = req.params
     
     if (!dealId) {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required')
     }
-    
-    const deal = await dealStore.findById(dealId)
-    
-    if (!deal) {
-      throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
-    }
-    
-    const userId = req.headers['x-user-id'] || (req as any).user?.id
-    
-    // Check if user is tenant or landlord
-    if (userId && userId !== deal.tenantId && userId !== deal.landlordId) {
-      throw new AppError(ErrorCode.FORBIDDEN, 403, 'You are not authorized to view this schedule')
-    }
-    
+
+    await loadDealForParty(req, dealId)
+
     const { getSchedule } = await import('../services/repaymentScheduleService.js')
     const schedule = await getSchedule(dealId)
     

@@ -12,11 +12,12 @@ export interface DurableApiIdempotencyOptions {
   requireKey?: boolean
 }
 
-/** Per-user, per-route scope, so one key can be reused across users and routes without colliding. */
+/**
+ * Per-user, per-route scope, so one key can be reused across users and routes without colliding.
+ * Unauthenticated callers are scoped by IP, since no identity is available to trust.
+ */
 function scopeFor(req: Request): string {
-  const userId =
-    (req as { user?: { id?: string } }).user?.id ??
-    (typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'] : 'anonymous')
+  const userId = (req as { user?: { id?: string } }).user?.id ?? `ip:${req.ip}`
   const route = `${req.baseUrl}${typeof req.route?.path === 'string' ? req.route.path : req.path}`
   return `api:${userId}:${req.method}:${route}`
 }

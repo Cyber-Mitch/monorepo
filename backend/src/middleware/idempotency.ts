@@ -157,9 +157,8 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
       return
     }
 
-    const userId =
-      (req as { user?: { id?: string } }).user?.id ??
-      (typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'] : 'anonymous')
+    // Unauthenticated callers are scoped by IP, since no identity is available to trust.
+    const userId = (req as { user?: { id?: string } }).user?.id ?? `ip:${req.ip}`
     const cacheKey = createHash('sha256').update(`${userId}:${trimmedKey}`).digest('hex')
 
     // Compute a hash of the incoming payload for conflict detection
