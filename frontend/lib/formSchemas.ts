@@ -145,3 +145,65 @@ export type ContactFormValues = z.infer<typeof contactSchema>;
 export type PreScreenFormValues = z.infer<typeof preScreenSchema>;
 export type QuotaLookupFormValues = z.infer<typeof quotaLookupSchema>;
 export type QuotaOverrideFormValues = z.infer<typeof quotaOverrideSchema>;
+
+// ── Compliance reports ────────────────────────────────────────────────────────
+
+/**
+ * Maximum allowed span (inclusive of both dates) of a compliance report's
+ * date range. Enforced by `complianceReportSchema` so an admin cannot queue
+ * an export that would scan an unbounded window.
+ */
+export const COMPLIANCE_REPORT_MAX_RANGE_DAYS = 90;
+
+/** Report types an admin can export. Mirrors the backend compliance domain. */
+export const complianceReportTypes = [
+  "transactions",
+  "kyc",
+  "settlements",
+  "audit_log",
+] as const;
+export type ComplianceReportType = (typeof complianceReportTypes)[number];
+
+/**
+ * Parses a `type="date"` input value (YYYY-MM-DD) as a local calendar date.
+ * Returns null for empty or unparseable input so field-level rules report
+ * "required" first and range refinements only run when both dates are present.
+ */
+function parseFormDate(value: string): Date | null {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export const complianceReportSchema = z
+  .object({
+    type: z.enum(complianceReportTypes, {
+      required_error: "Select a report type",
+    }),
+    startDate: z.string().min(1, "Start date is required"),
+    endDate: z.string().min(1, "End date is required"),
+  })
+  .refine(
+    (data) => {
+      const start = parseFormDate(data.startDate);
+      const end = parseFormDate(data.endDate);
+      if (!start || !end) return true;
+      return end.getTime() >= start.getTime();
+    },
+    { message: "End date must be on or after the start date", path: ["endDate"] },
+  )
+  .refine(
+    (data) => {
+      const start = parseFormDate(data.startDate);
+      const end = parseFormDate(data.endDate);
+      if (!start || !end) return true;
+      const days = (end.getTime() - start.getTime()) / 86_400_000;
+      return days <= COMPLIANCE_REPORT_MAX_RANGE_DAYS;
+    },
+    {
+      message: `Date range cannot exceed ${COMPLIANCE_REPORT_MAX_RANGE_DAYS} days`,
+      path: ["endDate"],
+    },
+  );
+
+export type ComplianceReportFormValues = z.infer<typeof complianceReportSchema>;
