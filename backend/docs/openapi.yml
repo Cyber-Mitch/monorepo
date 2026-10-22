@@ -1846,9 +1846,8 @@ paths:
       operationId: createDeal
       tags:
         - Deals
-      # NOTE: createDealsRouter() applies no auth middleware to any /api/deals route today
-      # (see PR description — code/spec mismatch finding). security:[] reflects current code.
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -1930,7 +1929,8 @@ paths:
       operationId: getDeals
       tags:
         - Deals
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: tenantId
           in: query
@@ -1992,7 +1992,8 @@ paths:
       operationId: getDealById
       tags:
         - Deals
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: dealId
           in: path
@@ -2031,7 +2032,8 @@ paths:
       operationId: updateDealStatus
       tags:
         - Deals
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: dealId
           in: path
@@ -2078,7 +2080,8 @@ paths:
       operationId: updateScheduleItemStatus
       tags:
         - Deals
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: dealId
           in: path
@@ -2152,7 +2155,8 @@ paths:
       operationId: getDealProgress
       tags:
         - Deals
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: dealId
           in: path

@@ -153,7 +153,7 @@ export default function PrivacyPolicyPage() {
               </p>
               <div className="text-muted-foreground space-y-2">
                 <p><strong>Email:</strong> privacy@shelterflex.com</p>
-                <p><strong>Phone:</strong> +234 (0) XXX XXX XXXX</p>
+                <p><strong>Phone:</strong> +234 123 456 7890</p>
                 <p><strong>Address:</strong> Lagos, Nigeria</p>
               </div>
             </section>

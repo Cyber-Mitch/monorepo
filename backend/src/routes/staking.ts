@@ -46,24 +46,6 @@ function formatAmount6(amountMicro: bigint): string {
   return `${negative ? '-' : ''}${whole.toString()}.${frac}`
 }
 
-function getValidatedUserIdHeader(req: Request): string {
-  const rawUserId = req.headers['x-user-id']
-  if (typeof rawUserId !== 'string') {
-    throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Missing x-user-id header')
-  }
-
-  const userId = rawUserId.trim()
-  if (userId.length === 0 || !/^[A-Za-z0-9_-]{3,128}$/.test(userId)) {
-    throw new AppError(
-      ErrorCode.VALIDATION_ERROR,
-      400,
-      'Invalid x-user-id header: expected 3-128 chars of letters, numbers, underscore, or hyphen',
-    )
-  }
-
-  return userId
-}
-
 export function createStakingRouter(
   adapter: SorobanAdapter,
   walletService: WalletService,
@@ -120,12 +102,16 @@ export function createStakingRouter(
 
   router.post(
     '/deposit/initiate',
+    authenticateToken,
     durableApiIdempotency(),
     validate(depositInitiateSchema),
-    async (req: Request, res: Response, next: NextFunction) => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { quoteId, paymentRail, customerMeta } = req.body as DepositInitiateRequest
-        const userId = getValidatedUserIdHeader(req)
+        const userId = req.user?.id
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
+        }
 
         const quote = await quoteStore.getById(quoteId)
         if (!quote) {
