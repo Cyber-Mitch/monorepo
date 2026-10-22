@@ -1,72 +1,36 @@
-import { randomUUID } from 'crypto'
-import { getRedisClient } from '../utils/redis.js'
+import { abuseStore } from '../models/abuseStore.js'
+import { logger } from '../utils/logger.js'
 
 export interface AbuseEvent {
   id: string
   target: string // IP address or user ID
-  type: 'credential_stuffing' | 'scraping' | 'deal_spam'
+  type: 'credential_stuffing' | 'scraping' | 'deal_spam' | 'manual_block'
   timestamp: Date
   expiresAt: Date
+  reason?: string
 }
 
-// In-memory fallback stores for tracking and tests
-const failedAuthStore = new Map<string, { count: number; expiresAt: number }>()
-const searchHitsStore = new Map<string, { count: number; expiresAt: number }>()
-const dealSpamStore = new Map<string, { count: number; expiresAt: number }>()
+// Thresholds and windows (documented for clarity)
+const CREDENTIAL_STUFFING_THRESHOLD = 10
+const CREDENTIAL_STUFFING_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
+const CREDENTIAL_STUFFING_BLOCK_MS = 60 * 60 * 1000 // 1 hour
 
-export const abuseEvents: AbuseEvent[] = []
+const SCRAPING_THRESHOLD = 180 // 3x search limit (60 req/min)
+const SCRAPING_WINDOW_MS = 60 * 1000 // 60 seconds
+const SCRAPING_BLOCK_MS = 60 * 60 * 1000 // 1 hour
 
-export const abuseEventStore = {
-  add(event: Omit<AbuseEvent, 'id' | 'timestamp'>): AbuseEvent {
-    const fullEvent: AbuseEvent = {
-      id: randomUUID(),
-      target: event.target,
-      type: event.type,
-      timestamp: new Date(),
-      expiresAt: event.expiresAt,
-    }
-    abuseEvents.push(fullEvent)
-    return fullEvent
-  },
-
-  getAll(): AbuseEvent[] {
-    const now = new Date()
-    return abuseEvents.filter((e) => e.expiresAt > now)
-  },
-
-  getPaginated(page: number, pageSize: number) {
-    const active = this.getAll().sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-    const total = active.length
-    const start = (page - 1) * pageSize
-    const data = active.slice(start, start + pageSize)
-    return { data, total }
-  },
-
-  clear() {
-    abuseEvents.length = 0
-    failedAuthStore.clear()
-    searchHitsStore.clear()
-    dealSpamStore.clear()
-  }
-}
+const DEAL_SPAM_THRESHOLD = 5
+const DEAL_SPAM_WINDOW_MS = 60 * 60 * 1000 // 1 hour
+const DEAL_SPAM_BLOCK_MS = 60 * 60 * 1000 // 1 hour
 
 export async function detectCredentialStuffing(ip: string): Promise<boolean> {
-  const now = Date.now()
-  const windowMs = 5 * 60 * 1000 // 5 minutes
-  const blockMs = 60 * 60 * 1000 // 1 hour
+  const key = `failed_auth:${ip}`
+  const count = await abuseStore.incrementCounter(key, CREDENTIAL_STUFFING_WINDOW_MS)
 
-  const record = failedAuthStore.get(ip)
-  let count = 1
-  if (record && record.expiresAt > now) {
-    count = record.count + 1
-    record.count = count
-  } else {
-    failedAuthStore.set(ip, { count: 1, expiresAt: now + windowMs })
-  }
-
-  if (count > 10) {
-    const expiresAt = new Date(now + blockMs)
-    abuseEventStore.add({
+  if (count > CREDENTIAL_STUFFING_THRESHOLD) {
+    const expiresAt = new Date(Date.now() + CREDENTIAL_STUFFING_BLOCK_MS)
+    await abuseStore.setBlock(ip, 'ip', 'credential_stuffing', expiresAt)
+    await abuseStore.addEvent({
       target: ip,
       type: 'credential_stuffing',
       expiresAt,
@@ -74,41 +38,17 @@ export async function detectCredentialStuffing(ip: string): Promise<boolean> {
     return true
   }
 
-  try {
-    const redis = getRedisClient()
-    const key = `failed_auth:${ip}`
-    const val = await redis.get(key)
-    const current = val ? parseInt(val, 10) + 1 : 1
-    await redis.set(key, current.toString(), 'EX' as any, 300)
-
-    if (current > 10) {
-      await redis.set(`blocked_ip:${ip}`, 'true', 'EX' as any, 3600)
-      return true
-    }
-  } catch (err) {
-    // Fail silently
-  }
-
   return false
 }
 
 export async function detectScrapingPattern(ip: string): Promise<boolean> {
-  const now = Date.now()
-  const windowMs = 60 * 1000 // 60 seconds
-  const blockMs = 60 * 60 * 1000 // 1 hour
+  const key = `search_hits:${ip}`
+  const count = await abuseStore.incrementCounter(key, SCRAPING_WINDOW_MS)
 
-  const record = searchHitsStore.get(ip)
-  let count = 1
-  if (record && record.expiresAt > now) {
-    count = record.count + 1
-    record.count = count
-  } else {
-    searchHitsStore.set(ip, { count: 1, expiresAt: now + windowMs })
-  }
-
-  if (count > 180) { // 3x search limit (60 req/min)
-    const expiresAt = new Date(now + blockMs)
-    abuseEventStore.add({
+  if (count > SCRAPING_THRESHOLD) {
+    const expiresAt = new Date(Date.now() + SCRAPING_BLOCK_MS)
+    await abuseStore.setBlock(ip, 'ip', 'scraping', expiresAt)
+    await abuseStore.addEvent({
       target: ip,
       type: 'scraping',
       expiresAt,
@@ -116,42 +56,17 @@ export async function detectScrapingPattern(ip: string): Promise<boolean> {
     return true
   }
 
-  try {
-    const redis = getRedisClient()
-    const key = `search_hits:${ip}`
-    const val = await redis.get(key)
-    const current = val ? parseInt(val, 10) + 1 : 1
-    await redis.set(key, current.toString(), 'EX' as any, 60)
-
-    if (current > 180) {
-      await redis.set(`blocked_ip:${ip}`, 'true', 'EX' as any, 3600)
-      return true
-    }
-  } catch (err) {
-    // Fail silently
-  }
-
   return false
 }
 
 export async function detectDuplicateDealSpam(userId: string, listingId: string): Promise<boolean> {
-  const now = Date.now()
-  const windowMs = 60 * 60 * 1000 // 1 hour
-  const blockMs = 60 * 60 * 1000 // 1 hour
+  const key = `deal_spam:${userId}:${listingId}`
+  const count = await abuseStore.incrementCounter(key, DEAL_SPAM_WINDOW_MS)
 
-  const key = `${userId}:${listingId}`
-  const record = dealSpamStore.get(key)
-  let count = 1
-  if (record && record.expiresAt > now) {
-    count = record.count + 1
-    record.count = count
-  } else {
-    dealSpamStore.set(key, { count: 1, expiresAt: now + windowMs })
-  }
-
-  if (count > 5) {
-    const expiresAt = new Date(now + blockMs)
-    abuseEventStore.add({
+  if (count > DEAL_SPAM_THRESHOLD) {
+    const expiresAt = new Date(Date.now() + DEAL_SPAM_BLOCK_MS)
+    await abuseStore.setBlock(userId, 'user', 'deal_spam', expiresAt)
+    await abuseStore.addEvent({
       target: userId,
       type: 'deal_spam',
       expiresAt,
@@ -159,56 +74,36 @@ export async function detectDuplicateDealSpam(userId: string, listingId: string)
     return true
   }
 
-  try {
-    const redis = getRedisClient()
-    const redisKey = `deal_spam:${userId}:${listingId}`
-    const val = await redis.get(redisKey)
-    const current = val ? parseInt(val, 10) + 1 : 1
-    await redis.set(redisKey, current.toString(), 'EX' as any, 3600)
-
-    if (current > 5) {
-      await redis.set(`blocked_user:${userId}`, 'true', 'EX' as any, 3600)
-      return true
-    }
-  } catch (err) {
-    // Fail silently
-  }
-
   return false
 }
 
 export async function isIpBlocked(ip: string): Promise<boolean> {
-  const now = new Date()
-  const hasInMemoryBlock = abuseEvents.some(
-    (e) => e.target === ip && e.expiresAt > now && (e.type === 'credential_stuffing' || e.type === 'scraping')
-  )
-  if (hasInMemoryBlock) return true
-
-  try {
-    const redis = getRedisClient()
-    const blocked = await redis.get(`blocked_ip:${ip}`)
-    if (blocked === 'true') return true
-  } catch (err) {
-    // Fail silently
-  }
-
-  return false
+  const block = await abuseStore.getBlock(ip, 'ip')
+  return block !== null
 }
 
 export async function isUserBlocked(userId: string): Promise<boolean> {
-  const now = new Date()
-  const hasInMemoryBlock = abuseEvents.some(
-    (e) => e.target === userId && e.expiresAt > now && e.type === 'deal_spam'
-  )
-  if (hasInMemoryBlock) return true
+  const block = await abuseStore.getBlock(userId, 'user')
+  return block !== null
+}
 
-  try {
-    const redis = getRedisClient()
-    const blocked = await redis.get(`blocked_user:${userId}`)
-    if (blocked === 'true') return true
-  } catch (err) {
-    // Fail silently
+// Legacy exports for backward compatibility with comprehensiveRateLimit.ts
+export const abuseEventStore = {
+  add(event: Omit<AbuseEvent, 'id' | 'timestamp'>): Promise<AbuseEvent> {
+    return abuseStore.addEvent(event)
+  },
+  getAll(): Promise<AbuseEvent[]> {
+    return abuseStore.listEvents()
+  },
+  getPaginated(page: number, pageSize: number) {
+    return abuseStore.listEvents().then((events) => {
+      const total = events.length
+      const start = (page - 1) * pageSize
+      const data = events.slice(start, start + pageSize)
+      return { data, total }
+    })
+  },
+  async clear() {
+    await abuseStore.clear()
   }
-
-  return false
 }

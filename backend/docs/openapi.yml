@@ -3239,6 +3239,264 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/admin/abuse/events:
+    get:
+      summary: List abuse detection events
+      description: Returns a list of abuse detection events (credential stuffing, scraping, deal spam, manual blocks). Events are filtered by type and target if provided. Requires the abuse:manage permission.
+      operationId: listAbuseEvents
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: type
+          in: query
+          description: Filter by event type
+          schema:
+            type: string
+            enum: [credential_stuffing, scraping, deal_spam, manual_block]
+        - name: target
+          in: query
+          description: Filter by target (IP address or user ID)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Abuse events listed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - events
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - target
+                        - type
+                        - timestamp
+                        - expiresAt
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          description: Event ID
+                        target:
+                          type: string
+                          description: IP address or user ID
+                        type:
+                          type: string
+                          enum: [credential_stuffing, scraping, deal_spam, manual_block]
+                        timestamp:
+                          type: string
+                          format: date-time
+                          description: When the event occurred
+                        expiresAt:
+                          type: string
+                          format: date-time
+                          description: When the event expires
+                        reason:
+                          type: string
+                          description: Reason for manual blocks
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/abuse/blocks:
+    get:
+      summary: List active abuse blocks
+      description: Returns a list of currently active blocks (IPs and users). Blocks are filtered by targetType and type if provided. Requires the abuse:manage permission.
+      operationId: listAbuseBlocks
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: targetType
+          in: query
+          description: Filter by target type
+          schema:
+            type: string
+            enum: [ip, user]
+        - name: type
+          in: query
+          description: Filter by block type
+          schema:
+            type: string
+            enum: [credential_stuffing, scraping, deal_spam, manual_block]
+      responses:
+        '200':
+          description: Active blocks listed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - blocks
+                properties:
+                  blocks:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - target
+                        - targetType
+                        - type
+                        - expiresAt
+                        - blockedAt
+                      properties:
+                        target:
+                          type: string
+                          description: IP address or user ID
+                        targetType:
+                          type: string
+                          enum: [ip, user]
+                        type:
+                          type: string
+                          enum: [credential_stuffing, scraping, deal_spam, manual_block]
+                        expiresAt:
+                          type: string
+                          format: date-time
+                          description: When the block expires
+                        reason:
+                          type: string
+                          description: Reason for manual blocks
+                        blockedBy:
+                          type: string
+                          description: Admin user ID who created the block
+                        blockedAt:
+                          type: string
+                          format: date-time
+                          description: When the block was created
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      summary: Create manual block
+      description: Manually blocks an IP address or user account for a specified duration. Requires the abuse:manage permission.
+      operationId: createManualBlock
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - target
+                - targetType
+                - reason
+                - expiryHours
+              properties:
+                target:
+                  type: string
+                  description: IP address or user ID to block
+                  example: "127.0.0.1"
+                targetType:
+                  type: string
+                  enum: [ip, user]
+                  description: Type of target
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Reason for the block
+                  example: "Suspicious activity detected"
+                expiryHours:
+                  type: integer
+                  minimum: 1
+                  maximum: 8760
+                  description: Block duration in hours (max 1 year)
+                  example: 24
+      responses:
+        '200':
+          description: Block created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - target
+                  - targetType
+                  - expiresAt
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  target:
+                    type: string
+                  targetType:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/abuse/blocks/{target}:
+    delete:
+      summary: Remove block
+      description: Removes an active block for an IP address or user. Requires the abuse:manage permission.
+      operationId: removeBlock
+      tags:
+        - Admin
+      security:
+        - bearerAdminAuth: []
+      parameters:
+        - name: target
+          in: path
+          required: true
+          description: IP address or user ID to unblock
+          schema:
+            type: string
+        - name: targetType
+          in: query
+          required: true
+          description: Type of target (ip or user)
+          schema:
+            type: string
+            enum: [ip, user]
+      responses:
+        '200':
+          description: Block removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - target
+                  - targetType
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  target:
+                    type: string
+                  targetType:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/staking/stake:
     post:
       summary: Stake USDC tokens

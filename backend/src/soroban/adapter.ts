@@ -407,18 +407,6 @@ export interface SorobanAdapter {
   // stake_delegation contract — delegated staking where passive holders delegate to operators (#1885).
   // Users sign stake/delegate/undelegate/request_undelegate/complete_undelegate in their own wallet.
   // Operators claim commission and delegatee rewards.
-  /** A delegation entry returned by the contract. */
-  interface DelegationEntry {
-    delegatee: string
-    amount: bigint
-    cooldownEndTs: number
-  }
-  /** A delegatee (operator) entry from the contract. */
-  interface DelegateeEntry {
-    address: string
-    totalDelegated: bigint
-    commissionBps: number
-  }
   /** Prepare an unsigned user-signed delegation call for wallet signing. */
   prepareDelegationCall?(call: string, user: string, amount?: bigint, delegatee?: string): Promise<string>
   /** Submit a signed user-signed delegation call. */
@@ -431,7 +419,6 @@ export interface SorobanAdapter {
   listDelegatees?(): Promise<DelegateeEntry[]>
   /** Get the current epoch number from the delegation contract. */
   delegationCurrentEpoch?(): Promise<number>
-  /** Operator: set commission rate (basis points). */
   /** Operator: set commission rate (basis points). */
   setCommission?(operator: string, commissionBps: number): Promise<string>
   /** Operator: claim accumulated commission. */
@@ -473,4 +460,18 @@ export interface SorobanAdapter {
     call: MultisigCall,
     params: MultisigCallParams,
   ): Promise<string>
+}
+
+/** A delegation entry returned by the contract. */
+export interface DelegationEntry {
+  delegatee: string
+  amount: bigint
+  cooldownEndTs: number
+}
+
+/** A delegatee (operator) entry from the contract. */
+export interface DelegateeEntry {
+  address: string
+  totalDelegated: bigint
+  commissionBps: number
 }
