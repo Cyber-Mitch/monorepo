@@ -8465,6 +8465,128 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/v1/admin/reputation:
+    get:
+      summary: List cached tenant reputation scores
+      description: |
+        Returns the last-published reputation record for every tenant, ordered
+        by most recently synced. Requires `reputation:manage` permission. (#1980)
+      operationId: listTenantReputationScores
+      tags:
+        - Tenant Reputation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: List of reputation records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TenantReputationScore'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/reputation/{tenantId}:
+    get:
+      summary: Get the cached reputation score for one tenant
+      description: |
+        Returns the most recently persisted reputation record for the given tenant.
+        404 when no sync has run yet. Requires `reputation:manage` permission. (#1980)
+      operationId: getTenantReputationScore
+      tags:
+        - Tenant Reputation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tenant reputation record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/TenantReputationScore'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/v1/admin/reputation/{tenantId}/sync:
+    post:
+      summary: Force a reputation sync for one tenant
+      description: |
+        Recomputes the tenant's reputation from current ratings and payment history.
+        Persists the new record and enqueues a `TENANT_REPUTATION_UPDATE` outbox item
+        only when the record changed. Idempotent: repeated calls with identical data
+        produce no additional outbox items. Requires `reputation:manage` permission. (#1980)
+      operationId: syncTenantReputation
+      tags:
+        - Tenant Reputation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sync successful; returns the current record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/TenantReputationScore'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/v1/inspector/jobs:
     get:
       summary: List available inspection jobs in the inspector's service areas
@@ -8900,6 +9022,63 @@ components:
         type: string
         format: uuid
   schemas:
+    TenantReputationScore:
+      type: object
+      description: |
+        Cached reputation record for one tenant, computed from landlord ratings
+        and payment history. All scores are integers on a 0–100 scale. The
+        on-chain contract stores them at 0–1000 (×10); the API surface uses
+        0–100 for human readability. (#1980)
+      required:
+        - id
+        - tenantId
+        - compositeScore
+        - paymentScore
+        - propertyCareScore
+        - communicationScore
+        - totalRatings
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        compositeScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            Weighted composite: payment × 0.50, propertyCare × 0.30,
+            communication × 0.20.
+        paymentScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            On-time payment rate. 100 = all on time; 0 = all missed.
+            Defaults to 50 when no scored payments exist.
+        propertyCareScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            Average landlord propertyCare rating (1–5) scaled ×20.
+            Defaults to 50 when no ratings exist.
+        communicationScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            Average landlord communication rating (1–5) scaled ×20.
+            Defaults to 50 when no ratings exist.
+        totalRatings:
+          type: integer
+          minimum: 0
+          description: Number of landlord ratings received.
+        updatedAt:
+          type: string
+          format: date-time
     PublicProperty:
       type: object
       description: Approved property as returned by the public property routes (#1956). Amenities are omitted because listings do not store them yet.
@@ -11498,5 +11677,10 @@ tags:
     description: Stake-weighted parameter governance proposals and voting (contracts/governance)
   - name: Tenant Rating
     description: Landlord ratings of tenants after a deal, and the tenant's portable rating card with expiring public share links (#1905)
+  - name: Tenant Reputation
+    description: >
+      Computed on-chain tenant reputation scores derived from landlord ratings and
+      payment history. Scores (0–100) are synced to the tenant_reputation Soroban
+      contract via the outbox on every meaningful change (#1980).
   - name: Properties
     description: Public search, lookup and detail for approved properties (#1956)

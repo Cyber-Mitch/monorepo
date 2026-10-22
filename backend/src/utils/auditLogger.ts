@@ -119,6 +119,8 @@ export type AuditEventType =
   | 'TENANT_RATING_CREATED'
   | 'RATING_CARD_SHARE_CREATED'
   | 'RATING_CARD_SHARE_REVOKED'
+  // Tenant reputation scoring (#1980)
+  | 'TENANT_REPUTATION_SYNCED'
   // Rent guarantee insurance
   | 'INSURANCE_QUOTE_REQUESTED'
   | 'INSURANCE_POLICY_PURCHASED'
