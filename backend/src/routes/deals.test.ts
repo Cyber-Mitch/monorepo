@@ -6,13 +6,68 @@ import { outboxStore } from '../outbox/store.js'
 import { OutboxStatus, TxType } from '../outbox/types.js'
 import { listingStore } from '../models/listingStore.js'
 import { ListingStatus } from '../models/listing.js'
+import { sessionStore, userStore } from '../models/authStore.js'
+
+const TENANT_TOKEN = 'test-token-deals-tenant'
+const LANDLORD_TOKEN = 'test-token-deals-landlord'
+const OUTSIDER_TOKEN = 'test-token-deals-outsider'
+const ADMIN_TOKEN = 'test-token-deals-admin'
+
+function bearer(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}` }
+}
 
 describe('Deals API', () => {
   let app: any
+  let tenantId: string
+  let landlordId: string
 
   beforeEach(async () => {
     await dealStore.clear()
     app = createApp()
+
+    sessionStore.clear()
+    const tenant = await userStore.getOrCreateByEmail('deals-tenant@example.com')
+    const landlord = await userStore.getOrCreateByEmail('deals-landlord@example.com')
+    const outsider = await userStore.getOrCreateByEmail('deals-outsider@example.com')
+    const admin = await userStore.getOrCreateByEmail('deals-admin@example.com')
+    admin.role = 'admin'
+    tenantId = tenant.id
+    landlordId = landlord.id
+    await sessionStore.create(tenant.email, TENANT_TOKEN)
+    await sessionStore.create(landlord.email, LANDLORD_TOKEN)
+    await sessionStore.create(outsider.email, OUTSIDER_TOKEN)
+    await sessionStore.create(admin.email, ADMIN_TOKEN)
+  })
+
+  describe('authentication', () => {
+    it('rejects requests without a bearer token on every deals route', async () => {
+      const fakeId = '550e8400-e29b-41d4-a716-446655440999'
+      const requests = [
+        request(app).get('/api/deals'),
+        request(app).get(`/api/deals/${fakeId}`),
+        request(app).get(`/api/deals/${fakeId}/progress`),
+        request(app).get(`/api/deals/${fakeId}/schedule`),
+        request(app).post('/api/deals').send({}),
+        request(app).patch(`/api/deals/${fakeId}/status`).send({ status: 'active' }),
+        request(app).patch(`/api/deals/${fakeId}/schedule/1`).send({ status: 'paid' }),
+        request(app).patch(`/api/deals/${fakeId}/repayment`).send({}),
+      ]
+
+      for (const pending of requests) {
+        const response = await pending
+        expect(response.status).toBe(401)
+      }
+    })
+
+    it('ignores an x-user-id header when deciding who the caller is', async () => {
+      const response = await request(app)
+        .get('/api/deals')
+        .set('x-user-id', tenantId)
+        .expect(401)
+
+      expect(response.body.error.code).toBe('UNAUTHORIZED')
+    })
   })
 
   describe('POST /api/deals', () => {
@@ -37,8 +92,8 @@ describe('Deals API', () => {
 
     it('should create a new deal with valid data', async () => {
       const dealData = {
-        tenantId: 'tenant-001',
-        landlordId: 'landlord-001',
+        tenantId,
+        landlordId,
         listingId: approvedListingId,
         annualRentNgn: 1200000,
         depositNgn: 240000,
@@ -47,6 +102,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send(dealData)
         .expect(201)
 
@@ -64,7 +120,7 @@ describe('Deals API', () => {
       expect(response.body.data.dealId).toBeDefined()
       expect(response.body.data.createdAt).toBeDefined()
       expect(response.body.data.schedule).toHaveLength(12)
-      
+
       // Check schedule structure
       const firstPayment = response.body.data.schedule[0]
       expect(firstPayment).toMatchObject({
@@ -75,10 +131,26 @@ describe('Deals API', () => {
       expect(firstPayment.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/)
     })
 
+    it('rejects a deal the caller is not party to', async () => {
+      const response = await request(app)
+        .post('/api/deals')
+        .set(bearer(OUTSIDER_TOKEN))
+        .send({
+          tenantId,
+          landlordId,
+          annualRentNgn: 1200000,
+          depositNgn: 240000,
+          termMonths: 12
+        })
+        .expect(403)
+
+      expect(response.body.error.code).toBe('FORBIDDEN')
+    })
+
     it('should reject deal with insufficient deposit', async () => {
       const dealData = {
-        tenantId: 'tenant-001',
-        landlordId: 'landlord-001',
+        tenantId,
+        landlordId,
         annualRentNgn: 1200000,
         depositNgn: 200000, // Only 16.67%, should be >= 20%
         termMonths: 12
@@ -86,6 +158,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send(dealData)
         .expect(400)
 
@@ -96,8 +169,8 @@ describe('Deals API', () => {
 
     it('should reject deal with invalid term months', async () => {
       const dealData = {
-        tenantId: 'tenant-001',
-        landlordId: 'landlord-001',
+        tenantId,
+        landlordId,
         annualRentNgn: 1200000,
         depositNgn: 240000,
         termMonths: 9 // Invalid, should be 3, 6, or 12
@@ -105,6 +178,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send(dealData)
         .expect(400)
 
@@ -114,12 +188,13 @@ describe('Deals API', () => {
 
     it('should reject deal with missing required fields', async () => {
       const dealData = {
-        tenantId: 'tenant-001',
+        tenantId,
         // Missing landlordId, annualRentNgn, depositNgn, termMonths
       }
 
       const response = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send(dealData)
         .expect(400)
 
@@ -138,8 +213,8 @@ describe('Deals API', () => {
 
       // Fire two concurrent requests
       const [response1, response2] = await Promise.all([
-        request(app).post('/api/deals').send({ ...dealData, tenantId: 'tenant-001' }),
-        request(app).post('/api/deals').send({ ...dealData, tenantId: 'tenant-002' }),
+        request(app).post('/api/deals').set(bearer(ADMIN_TOKEN)).send({ ...dealData, tenantId: 'tenant-001' }),
+        request(app).post('/api/deals').set(bearer(ADMIN_TOKEN)).send({ ...dealData, tenantId: 'tenant-002' }),
       ])
 
       // Exactly one should succeed (201), one should fail (409)
@@ -167,9 +242,10 @@ describe('Deals API', () => {
       // First create a deal
       const createResponse = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send({
-          tenantId: 'tenant-001',
-          landlordId: 'landlord-001',
+          tenantId,
+          landlordId,
           annualRentNgn: 1200000,
           depositNgn: 240000,
           termMonths: 6
@@ -180,6 +256,7 @@ describe('Deals API', () => {
       // Then retrieve it
       const response = await request(app)
         .get(`/api/deals/${dealId}`)
+        .set(bearer(TENANT_TOKEN))
         .expect(200)
 
       expect(response.body.success).toBe(true)
@@ -187,11 +264,29 @@ describe('Deals API', () => {
       expect(response.body.data.schedule).toHaveLength(6)
     })
 
+    it('allows the landlord and admins, but not an outsider', async () => {
+      const createResponse = await request(app)
+        .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
+        .send({ tenantId, landlordId, annualRentNgn: 1200000, depositNgn: 240000, termMonths: 6 })
+      const dealId = createResponse.body.data.dealId
+
+      await request(app).get(`/api/deals/${dealId}`).set(bearer(LANDLORD_TOKEN)).expect(200)
+      await request(app).get(`/api/deals/${dealId}`).set(bearer(ADMIN_TOKEN)).expect(200)
+
+      const denied = await request(app)
+        .get(`/api/deals/${dealId}`)
+        .set(bearer(OUTSIDER_TOKEN))
+        .expect(403)
+      expect(denied.body.error.code).toBe('FORBIDDEN')
+    })
+
     it('should return 404 for non-existent deal', async () => {
       const fakeId = '550e8400-e29b-41d4-a716-446655440999'
 
       const response = await request(app)
         .get(`/api/deals/${fakeId}`)
+        .set(bearer(TENANT_TOKEN))
         .expect(404)
 
       expect(response.body.error.code).toBe('NOT_FOUND')
@@ -203,13 +298,13 @@ describe('Deals API', () => {
     beforeEach(async () => {
       // Create some test deals
       await dealStore.create({
-        tenantId: 'tenant-001',
-        landlordId: 'landlord-001',
+        tenantId,
+        landlordId,
         annualRentNgn: 1200000,
         depositNgn: 240000,
         termMonths: 12
       })
-      
+
       await dealStore.create({
         tenantId: 'tenant-002',
         landlordId: 'landlord-002',
@@ -219,9 +314,10 @@ describe('Deals API', () => {
       })
     })
 
-    it('should return paginated list of deals', async () => {
+    it('should return paginated list of deals to an admin', async () => {
       const response = await request(app)
         .get('/api/deals')
+        .set(bearer(ADMIN_TOKEN))
         .expect(200)
 
       expect(response.body.success).toBe(true)
@@ -234,25 +330,46 @@ describe('Deals API', () => {
 
     it('should filter deals by tenantId', async () => {
       const response = await request(app)
-        .get('/api/deals?tenantId=tenant-001')
+        .get(`/api/deals?tenantId=${tenantId}`)
+        .set(bearer(ADMIN_TOKEN))
         .expect(200)
 
       expect(response.body.data.deals).toHaveLength(1)
-      expect(response.body.data.deals[0].tenantId).toBe('tenant-001')
+      expect(response.body.data.deals[0].tenantId).toBe(tenantId)
     })
 
     it('should filter deals by landlordId', async () => {
       const response = await request(app)
         .get('/api/deals?landlordId=landlord-002')
+        .set(bearer(ADMIN_TOKEN))
         .expect(200)
 
       expect(response.body.data.deals).toHaveLength(1)
       expect(response.body.data.deals[0].landlordId).toBe('landlord-002')
     })
 
+    it('lets a party list only deals they are on', async () => {
+      const response = await request(app)
+        .get(`/api/deals?tenantId=${tenantId}`)
+        .set(bearer(TENANT_TOKEN))
+        .expect(200)
+
+      expect(response.body.data.deals).toHaveLength(1)
+      expect(response.body.data.deals[0].tenantId).toBe(tenantId)
+    })
+
+    it('refuses a party an unfiltered list or another party\'s deals', async () => {
+      await request(app).get('/api/deals').set(bearer(TENANT_TOKEN)).expect(403)
+      await request(app)
+        .get('/api/deals?tenantId=tenant-002')
+        .set(bearer(TENANT_TOKEN))
+        .expect(403)
+    })
+
     it('should support pagination', async () => {
       const response = await request(app)
         .get('/api/deals?page=1&pageSize=1')
+        .set(bearer(ADMIN_TOKEN))
         .expect(200)
 
       expect(response.body.data.deals).toHaveLength(1)
@@ -267,9 +384,10 @@ describe('Deals API', () => {
       // Create a deal
       const createResponse = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send({
-          tenantId: 'tenant-001',
-          landlordId: 'landlord-001',
+          tenantId,
+          landlordId,
           annualRentNgn: 1200000,
           depositNgn: 240000,
           termMonths: 12
@@ -280,6 +398,7 @@ describe('Deals API', () => {
       // Update status
       const response = await request(app)
         .patch(`/api/deals/${dealId}/status`)
+        .set(bearer(LANDLORD_TOKEN))
         .send({ status: 'active' })
         .expect(200)
 
@@ -287,11 +406,29 @@ describe('Deals API', () => {
       expect(response.body.data.status).toBe('active')
     })
 
+    it('rejects a status change from a non-party', async () => {
+      const createResponse = await request(app)
+        .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
+        .send({ tenantId, landlordId, annualRentNgn: 1200000, depositNgn: 240000, termMonths: 12 })
+      const dealId = createResponse.body.data.dealId
+
+      await request(app)
+        .patch(`/api/deals/${dealId}/status`)
+        .set(bearer(OUTSIDER_TOKEN))
+        .send({ status: 'defaulted' })
+        .expect(403)
+
+      const deal = await dealStore.findById(dealId)
+      expect(deal?.status).toBe('draft')
+    })
+
     it('should return 404 for non-existent deal', async () => {
       const fakeId = '550e8400-e29b-41d4-a716-446655440999'
 
       const response = await request(app)
         .patch(`/api/deals/${fakeId}/status`)
+        .set(bearer(TENANT_TOKEN))
         .send({ status: 'active' })
         .expect(404)
 
@@ -304,9 +441,10 @@ describe('Deals API', () => {
       // Create a deal
       const createResponse = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send({
-          tenantId: 'tenant-001',
-          landlordId: 'landlord-001',
+          tenantId,
+          landlordId,
           annualRentNgn: 1200000,
           depositNgn: 240000,
           termMonths: 3
@@ -317,6 +455,7 @@ describe('Deals API', () => {
       // Update first payment status
       const response = await request(app)
         .patch(`/api/deals/${dealId}/schedule/1`)
+        .set(bearer(TENANT_TOKEN))
         .send({ status: 'paid' })
         .expect(200)
 
@@ -325,11 +464,29 @@ describe('Deals API', () => {
       expect(firstPayment.status).toBe('paid')
     })
 
+    it('rejects a schedule update from a non-party', async () => {
+      const createResponse = await request(app)
+        .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
+        .send({ tenantId, landlordId, annualRentNgn: 1200000, depositNgn: 240000, termMonths: 3 })
+      const dealId = createResponse.body.data.dealId
+
+      await request(app)
+        .patch(`/api/deals/${dealId}/schedule/1`)
+        .set(bearer(OUTSIDER_TOKEN))
+        .send({ status: 'paid' })
+        .expect(403)
+
+      const deal = await dealStore.findById(dealId)
+      expect(deal?.schedule.find((item) => item.period === 1)?.status).toBe('upcoming')
+    })
+
     it('should return 404 for non-existent deal', async () => {
       const fakeId = '550e8400-e29b-41d4-a716-446655440999'
 
       const response = await request(app)
         .patch(`/api/deals/${fakeId}/schedule/1`)
+        .set(bearer(TENANT_TOKEN))
         .send({ status: 'paid' })
         .expect(404)
 
@@ -341,9 +498,10 @@ describe('Deals API', () => {
       // periods, so accumulated equity hits the cap once all three are paid.
       const createResponse = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send({
-          tenantId: 'tenant-001',
-          landlordId: 'landlord-001',
+          tenantId,
+          landlordId,
           annualRentNgn: 1200000,
           depositNgn: 240000,
           termMonths: 3
@@ -351,9 +509,9 @@ describe('Deals API', () => {
 
       const dealId = createResponse.body.data.dealId
 
-      await request(app).patch(`/api/deals/${dealId}/schedule/1`).send({ status: 'paid' }).expect(200)
-      await request(app).patch(`/api/deals/${dealId}/schedule/2`).send({ status: 'paid' }).expect(200)
-      await request(app).patch(`/api/deals/${dealId}/schedule/3`).send({ status: 'paid' }).expect(200)
+      await request(app).patch(`/api/deals/${dealId}/schedule/1`).set(bearer(TENANT_TOKEN)).send({ status: 'paid' }).expect(200)
+      await request(app).patch(`/api/deals/${dealId}/schedule/2`).set(bearer(TENANT_TOKEN)).send({ status: 'paid' }).expect(200)
+      await request(app).patch(`/api/deals/${dealId}/schedule/3`).set(bearer(TENANT_TOKEN)).send({ status: 'paid' }).expect(200)
 
       // Accumulated equity now equals the cap (financedAmountNgn). Re-recording
       // period 1's payment mirrors a duplicate/replayed on-chain
@@ -362,13 +520,14 @@ describe('Deals API', () => {
       // EquityOverflow guard.
       const response = await request(app)
         .patch(`/api/deals/${dealId}/schedule/1`)
+        .set(bearer(TENANT_TOKEN))
         .send({ status: 'paid' })
         .expect(409)
 
       expect(response.body.error.code).toBe('EQUITY_OVERFLOW')
 
       // The schedule item's status must be unchanged by the rejected request.
-      const dealAfter = await request(app).get(`/api/deals/${dealId}`).expect(200)
+      const dealAfter = await request(app).get(`/api/deals/${dealId}`).set(bearer(TENANT_TOKEN)).expect(200)
       const period1 = dealAfter.body.data.schedule.find((item: any) => item.period === 1)
       expect(period1.status).toBe('paid')
     })
@@ -382,9 +541,10 @@ describe('Deals API', () => {
       // Create a fresh deal for each test
       const createRes = await request(app)
         .post('/api/deals')
+        .set(bearer(TENANT_TOKEN))
         .send({
-          tenantId: 'tenant-001',
-          landlordId: 'landlord-001',
+          tenantId,
+          landlordId,
           annualRentNgn: 1200000,
           depositNgn: 240000,
           termMonths: 12,
@@ -395,6 +555,7 @@ describe('Deals API', () => {
     it('should return zero progress when no receipts exist', async () => {
       const response = await request(app)
         .get(`/api/deals/${dealId}/progress`)
+        .set(bearer(TENANT_TOKEN))
         .expect(200)
 
       expect(response.body.success).toBe(true)
@@ -436,6 +597,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .get(`/api/deals/${dealId}/progress`)
+        .set(bearer(TENANT_TOKEN))
         .expect(200)
 
       const data = response.body.data
@@ -466,6 +628,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .get(`/api/deals/${dealId}/progress`)
+        .set(bearer(TENANT_TOKEN))
         .expect(200)
 
       const data = response.body.data
@@ -487,6 +650,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .get(`/api/deals/${dealId}/progress`)
+        .set(bearer(TENANT_TOKEN))
         .expect(200)
 
       expect(response.body.data.periodsPaid).toBe(0)
@@ -507,6 +671,7 @@ describe('Deals API', () => {
 
       const response = await request(app)
         .get(`/api/deals/${dealId}/progress`)
+        .set(bearer(TENANT_TOKEN))
         .expect(200)
 
       const data = response.body.data
@@ -515,10 +680,18 @@ describe('Deals API', () => {
       expect(data.nextDueDate).toBeNull()
     })
 
+    it('rejects progress reads from a non-party', async () => {
+      await request(app)
+        .get(`/api/deals/${dealId}/progress`)
+        .set(bearer(OUTSIDER_TOKEN))
+        .expect(403)
+    })
+
     it('should return 404 for non-existent deal', async () => {
       const fakeId = '550e8400-e29b-41d4-a716-446655440999'
       const response = await request(app)
         .get(`/api/deals/${fakeId}/progress`)
+        .set(bearer(TENANT_TOKEN))
         .expect(404)
 
       expect(response.body.error.code).toBe('NOT_FOUND')

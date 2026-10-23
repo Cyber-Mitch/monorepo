@@ -78,7 +78,7 @@ describe('AbuseDetectionService', () => {
       expect(triggered).toBe(true)
       expect(await isIpBlocked(ip)).toBe(true)
 
-      const events = abuseEventStore.getAll().filter((e) => e.target === ip)
+      const events = (await abuseEventStore.getAll()).filter((e) => e.target === ip)
       expect(events).toHaveLength(1)
       expect(events[0].type).toBe('credential_stuffing')
     })
@@ -104,13 +104,13 @@ describe('AbuseDetectionService', () => {
       for (let i = 0; i < 11; i++) {
         await detectCredentialStuffing(ip)
       }
-      expect(abuseEventStore.getAll().filter((e) => e.target === ip)).toHaveLength(1)
+      expect((await abuseEventStore.getAll()).filter((e) => e.target === ip)).toHaveLength(1)
 
       // Documents current behavior: further over-threshold calls keep adding events.
       await detectCredentialStuffing(ip)
       await detectCredentialStuffing(ip)
 
-      expect(abuseEventStore.getAll().filter((e) => e.target === ip)).toHaveLength(3)
+      expect((await abuseEventStore.getAll()).filter((e) => e.target === ip)).toHaveLength(3)
     })
   })
 
@@ -134,7 +134,7 @@ describe('AbuseDetectionService', () => {
       expect(triggered).toBe(true)
       expect(await isIpBlocked(ip)).toBe(true)
 
-      const events = abuseEventStore.getAll().filter((e) => e.target === ip)
+      const events = (await abuseEventStore.getAll()).filter((e) => e.target === ip)
       expect(events).toHaveLength(1)
       expect(events[0].type).toBe('scraping')
     })
@@ -162,7 +162,7 @@ describe('AbuseDetectionService', () => {
       expect(triggered).toBe(true)
       expect(await isUserBlocked(userId)).toBe(true)
 
-      const events = abuseEventStore.getAll().filter((e) => e.target === userId)
+      const events = (await abuseEventStore.getAll()).filter((e) => e.target === userId)
       expect(events).toHaveLength(1)
       expect(events[0].type).toBe('deal_spam')
     })
@@ -190,11 +190,11 @@ describe('AbuseDetectionService', () => {
       for (let i = 0; i < 6; i++) {
         await detectDuplicateDealSpam(userId, listingId)
       }
-      expect(abuseEventStore.getAll().filter((e) => e.target === userId)).toHaveLength(1)
+      expect((await abuseEventStore.getAll()).filter((e) => e.target === userId)).toHaveLength(1)
 
       await detectDuplicateDealSpam(userId, listingId)
 
-      expect(abuseEventStore.getAll().filter((e) => e.target === userId)).toHaveLength(2)
+      expect((await abuseEventStore.getAll()).filter((e) => e.target === userId)).toHaveLength(2)
     })
   })
 

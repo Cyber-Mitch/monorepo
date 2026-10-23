@@ -119,6 +119,8 @@ export type AuditEventType =
   | 'TENANT_RATING_CREATED'
   | 'RATING_CARD_SHARE_CREATED'
   | 'RATING_CARD_SHARE_REVOKED'
+  // Tenant reputation scoring (#1980)
+  | 'TENANT_REPUTATION_SYNCED'
   // Rent guarantee insurance
   | 'INSURANCE_QUOTE_REQUESTED'
   | 'INSURANCE_POLICY_PURCHASED'
@@ -230,8 +232,6 @@ function extractUserId(req: Request): string {
     if (user.sub) return String(user.sub)
   }
   if ((req as any).userId) return String((req as any).userId)
-  const headerUserId = req.headers['x-user-id']
-  if (typeof headerUserId === 'string' && headerUserId) return headerUserId
   return 'anonymous'
 }
 

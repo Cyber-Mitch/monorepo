@@ -40,6 +40,7 @@ import {
   MIN_TENURE_MONTHS_FOR_RATING,
   shareExpiryFrom,
 } from '../services/tenantRatingCard.js'
+import { scheduleSyncTenantReputation } from '../services/tenantReputationService.js'
 import {
   createRatingCardShareSchema,
   createTenantRatingSchema,
@@ -132,6 +133,10 @@ export function createLandlordTenantRatingRouter(): Router {
           landlordId: user.id,
           ratingId: rating.id,
         })
+
+        // Trigger a debounced reputation sync so the new rating is reflected
+        // in the on-chain tenant reputation record (#1980).
+        scheduleSyncTenantReputation(deal.tenantId)
 
         res.status(201).json({ success: true, data: toRatingDto(rating) })
       } catch (error) {

@@ -186,6 +186,11 @@ import {
   initTenantRatingStore,
 } from "./models/tenantRatingStore.js";
 import {
+  PostgresTenantReputationStore,
+  initTenantReputationStore,
+} from "./models/tenantReputationStore.js";
+import { createTenantReputationAdminRouter } from "./routes/tenantReputation.js";
+import {
   createInspectorJobsRouter,
   createAdminInspectionJobsRouter,
 } from "./routes/inspectionJobs.js";
@@ -307,6 +312,8 @@ import { createCircuitBreakerRouter } from "./routes/circuitBreaker.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
+import { initAbuseStore, RedisAbuseStore } from "./models/abuseStore.js";
+import { createAdminAbuseRouter } from "./routes/adminAbuse.js";
 import { createAdminOutboxRouter } from "./routes/adminOutbox.js";
 import {
   cacheInvalidationService,
@@ -624,6 +631,14 @@ export function createApp() {
     initFraudStore(new PostgresFraudStore());
   }
 
+  // Abuse Detection Store — use Redis in production, in-memory in tests
+  if (env.NODE_ENV !== "test" && process.env.REDIS_URL) {
+    initAbuseStore(new RedisAbuseStore());
+    logger.info("Abuse detection store initialized with Redis");
+  } else if (env.NODE_ENV === "production") {
+    logger.warn("Abuse detection store using in-memory fallback (Redis not configured). Counters will reset on deploy.");
+  }
+
   // Register notification job handler
   const notificationService = getNotificationService();
 
@@ -721,6 +736,7 @@ export function createApp() {
     initPropertyInspectionStore(new PostgresPropertyInspectionStore());
     initInspectorProfileStore(new PostgresInspectorProfileStore());
     initTenantRatingStore(new PostgresTenantRatingStore());
+    initTenantReputationStore(new PostgresTenantReputationStore());
     initInspectionJobStore(new PostgresInspectionJobStore());
   }
 
@@ -918,6 +934,7 @@ export function createApp() {
   app.use("/api/v1/admin/jobs", createAdminJobsRouter());
   app.use("/api/v1/admin/quota", createAdminQuotaRouter());
   app.use("/api/v1/admin/webhook-replay", createWebhookReplayRouter());
+  app.use("/api/v1/admin/abuse", createAdminAbuseRouter());
   app.use(
     "/api/v1/admin/timelock",
     adminTimelockRouter(sorobanAdapter as any, timelockRepo),
@@ -997,6 +1014,7 @@ export function createApp() {
     app.use("/api/admin/jobs", createAdminJobsRouter());
     app.use("/api/admin/quota", createAdminQuotaRouter());
     app.use("/api/admin/webhook-replay", createWebhookReplayRouter());
+    app.use("/api/admin/abuse", createAdminAbuseRouter());
     app.use("/api", createContractEventsRouter());
     app.use("/api/deals", createDealsRouter());
     app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
@@ -1127,6 +1145,7 @@ export function createApp() {
     app.use("/api/deals", createLandlordTenantRatingRouter());
     app.use("/api/tenant/rating-card", createTenantRatingCardRouter());
     app.use("/api/public/rating-card", createPublicRatingCardRouter());
+    app.use("/api/admin/reputation", createTenantReputationAdminRouter());
   }
 
   app.use("/api/v1/wallet", createWalletRouter(walletService));
@@ -1258,6 +1277,7 @@ export function createApp() {
   app.use("/api/v1/tenant/documents", createTenantDocumentsRouter());
   app.use("/api/v1/tenant/rating-card", createTenantRatingCardRouter());
   app.use("/api/v1/public/rating-card", createPublicRatingCardRouter());
+  app.use("/api/v1/admin/reputation", createTenantReputationAdminRouter());
   app.use("/api/v1/messaging", createMessagingRouter());
   app.use(
     "/api/v1/whistleblower/applications",

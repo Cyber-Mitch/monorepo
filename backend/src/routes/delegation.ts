@@ -12,7 +12,7 @@
  *   POST /api/v1/staking/delegation/claim-commission/prepare|submit    operator claims commission (user-signed)
  *   POST /api/v1/staking/delegation/claim-rewards/prepare|submit       user claims delegatee rewards (user-signed)
  *
- * The routes require authentication (x-user-id header) and validate amounts
+ * The routes require authentication (Bearer token) and validate amounts
  * against the user's free/delegated balance before preparing transactions.
  */
 

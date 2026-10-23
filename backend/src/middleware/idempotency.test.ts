@@ -9,6 +9,15 @@ const KEY_2 = '22222222-2222-4222-8222-222222222222'
 function buildApp(store: InMemoryIdempotencyStore, handler?: (req: Request, res: Response) => void) {
   const app = express()
   app.use(express.json())
+  // Stands in for authenticateToken: the test caller is set from x-test-user, never trusted for real identity.
+  app.use((req: Request, _res: Response, next) => {
+    const testUser = req.headers['x-test-user']
+    if (typeof testUser === 'string') {
+      const authed = req as Request & { user?: { id: string } }
+      authed.user = { id: testUser }
+    }
+    next()
+  })
 
   let callCount = 0
 
@@ -101,13 +110,13 @@ describe('idempotency middleware', () => {
 
     await supertest(app)
       .post('/test')
-      .set('x-user-id', 'user-a')
+      .set('x-test-user', 'user-a')
       .set('Idempotency-Key', KEY_1)
       .send({})
 
     await supertest(app)
       .post('/test')
-      .set('x-user-id', 'user-b')
+      .set('x-test-user', 'user-b')
       .set('Idempotency-Key', KEY_1)
       .send({})
 
@@ -131,7 +140,7 @@ describe('idempotency middleware', () => {
 
     const first = supertest(app)
       .post('/test')
-      .set('x-user-id', 'user-a')
+      .set('x-test-user', 'user-a')
       .set('Idempotency-Key', KEY_2)
       .send({})
     const firstDone = first.then((res) => res)
@@ -140,7 +149,7 @@ describe('idempotency middleware', () => {
 
     const second = await supertest(app)
       .post('/test')
-      .set('x-user-id', 'user-a')
+      .set('x-test-user', 'user-a')
       .set('Idempotency-Key', KEY_2)
       .send({})
 
