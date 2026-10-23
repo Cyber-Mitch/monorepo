@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/apiClient';
+import { apiGet, apiDelete, withQuery } from '@/lib/apiClient';
 
 export interface SessionItem {
   id: string;
@@ -9,14 +9,13 @@ export interface SessionItem {
 }
 
 export async function fetchSessions(): Promise<SessionItem[]> {
-  const res = await apiClient.get<SessionItem[]>('/auth/sessions');
-  return res.data;
+  return apiGet<SessionItem[]>('/auth/sessions');
 }
 
 export async function revokeSession(id: string): Promise<void> {
-  await apiClient.delete(`/auth/sessions/${id}`);
+  await apiDelete(`/auth/sessions/${id}`);
 }
 
 export async function revokeOtherSessions(): Promise<void> {
-  await apiClient.delete('/auth/sessions', { params: { others: 'true' } });
+  await apiDelete(withQuery('/auth/sessions', { others: 'true' }));
 }

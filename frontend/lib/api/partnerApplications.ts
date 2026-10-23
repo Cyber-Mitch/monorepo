@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/apiClient';
+import { apiGet, apiPatch, withQuery } from '@/lib/apiClient';
 
 export type PartnerApplicationStatus = 'pending' | 'contacted' | 'approved' | 'rejected';
 
@@ -27,11 +27,10 @@ export async function fetchPartnerApplications(status?: string, search?: string,
   if (search) params.append('search', search);
   params.append('page', page.toString());
   
-  const res = await apiClient.get<PartnerApplicationsResponse>(`/admin/partner-applications?${params.toString()}`);
-  return res.data;
+  const res = await apiGet<PartnerApplicationsResponse>(withQuery(`/admin/partner-applications`, Object.fromEntries(params)));
+  return res;
 }
 
 export async function updatePartnerApplicationStatus(id: string, status: PartnerApplicationStatus, notes?: string): Promise<PartnerApplication> {
-  const res = await apiClient.patch<PartnerApplication>(`/admin/partner-applications/${id}`, { status, notes });
-  return res.data;
+  return apiPatch<PartnerApplication>(`/admin/partner-applications/${id}`, { status, notes });
 }

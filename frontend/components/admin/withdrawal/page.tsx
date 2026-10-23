@@ -4,8 +4,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { privatePageMetadata } from '@/lib/seo';
 import { fetchWithdrawals, approveWithdrawal, rejectWithdrawal, WithdrawalRequest, WithdrawalStatus } from '@/lib/api/withdrawals';
 import { WithdrawalFilters } from '@/components/admin/WithdrawalFilters';
-import { Button } from '@/components/ui/Button';
-import { Dialog } from '@/components/ui/Dialog';
+import { Button } from '@/components/ui/button';
+import { ModalDialog } from '@/components/admin/ModalDialog';
 
 export default function AdminWithdrawalsPage() {
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
@@ -160,7 +160,7 @@ export default function AdminWithdrawalsPage() {
 
       {/* Confirmation / Rejection Modal */}
       {actionModal && (
-        <Dialog isOpen={!!actionModal} onClose={() => setActionModal(null)}>
+        <ModalDialog isOpen={!!actionModal} onClose={() => setActionModal(null)}>
           <form onSubmit={handleConfirmAction} className="p-6 max-w-md w-full space-y-4">
             <h3 className="text-lg font-bold capitalize">
               {actionModal.type} Withdrawal
@@ -199,7 +199,7 @@ export default function AdminWithdrawalsPage() {
               </Button>
             </div>
           </form>
-        </Dialog>
+        </ModalDialog>
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import { Suspense, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { ArrowRight, Info, Check, AlertCircle, Loader2 } from "lucide-react"
+import { useFeatureFlag } from "@/lib/featureFlags"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import {
@@ -33,6 +34,7 @@ function CalculatorContent() {
   const [deposit, setDeposit] = useState(Math.round(parsedInitial * 0.2));
   const [duration, setDuration] = useState(12);
   const scheduleBaseTime = Date.UTC(2025, 0, 1);
+  const rentToOwnEnabled = useFeatureFlag("RENT_TO_OWN_ENABLED");
 
   const effectivePrice = priceMode === "outright" ? outrightPrice : installmentPrice;
   const minDeposit = effectivePrice * 0.2;
@@ -70,6 +72,18 @@ function CalculatorContent() {
           <p className="text-sm text-muted-foreground max-w-2xl md:text-base lg:text-lg">
             See exactly how much you will pay each month. No hidden fees, no surprises.
           </p>
+
+          {rentToOwnEnabled && (
+            <div className="mt-4">
+              <Link
+                href="/calculator/rent-to-own"
+                className="inline-flex items-center gap-2 border-3 border-foreground bg-card px-4 py-2 font-mono text-sm font-bold shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(26,26,26,1)]"
+              >
+                New: Rent-to-Own calculator
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+          )}
 
         </div>
       </section>

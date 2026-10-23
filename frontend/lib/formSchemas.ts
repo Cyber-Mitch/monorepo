@@ -3,6 +3,7 @@
  * Import the schema you need and pass it to useAppForm's `schema` option.
  */
 import { z } from "zod";
+import { SUPPORTED_INSPECTOR_SERVICE_AREAS } from "../config/inspectorServiceAreas";
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
@@ -132,7 +133,83 @@ export const quotaOverrideSchema = z.object({
     }),
 });
 
-// ── Type exports ──────────────────────────────────────────────────────────────
+// ── Inspector configuration (#1921/#1922) ────────────────────────────────
+
+/** Overall inspection grade — mirrors backend INSPECTION_GRADES (#1903). */
+export const INSPECTION_GRADES = ["A", "B", "C", "D"] as const;
+export type InspectionGrade = (typeof INSPECTION_GRADES)[number];
+
+/** Rooms an inspector is asked to walk through on every report. */
+export const INSPECTION_ROOMS = [
+  "Living room",
+  "Kitchen",
+  "Bedroom(s)",
+  "Bathroom(s)",
+  "Toilet",
+  "Balcony / outdoor",
+  "Compound",
+] as const;
+
+export const ROOM_CHECK_RESULTS = ["pass", "fail", "na"] as const;
+export type RoomCheckResult = (typeof ROOM_CHECK_RESULTS)[number];
+
+/** Backend migration 029 constraints: at least 3 photos, notes >= 20 chars. */
+export const MIN_INSPECTION_PHOTOS = 3;
+export const MIN_INSPECTION_NOTES_LENGTH = 20;
+
+export const inspectionReportSchema = z.object({
+  overallGrade: z.enum(INSPECTION_GRADES, {
+    errorMap: () => ({ message: "Select an overall grade of A–D" }),
+  }),
+  rooms: z
+    .array(
+      z.object({
+        room: z.string().trim().min(1).max(100),
+        result: z.enum(ROOM_CHECK_RESULTS),
+      }),
+    )
+    .min(1, "Fill the room checklist for at least one room")
+    .max(30)
+    .refine(
+      (rooms) => new Set(rooms.map((room) => room.room)).size === rooms.length,
+      "Each room can appear once",
+    ),
+  photoKeys: z
+    .array(z.string().min(1).max(512))
+    .min(MIN_INSPECTION_PHOTOS, `At least ${MIN_INSPECTION_PHOTOS} photos are required`)
+    .max(50)
+    .refine(
+      (keys) => new Set(keys).size === keys.length,
+      "Photo keys must be unique",
+    ),
+  notes: z
+    .string()
+    .trim()
+    .min(
+      MIN_INSPECTION_NOTES_LENGTH,
+      `Notes must be at least ${MIN_INSPECTION_NOTES_LENGTH} characters`,
+    )
+    .max(5000, "Notes are capped at 5000 characters"),
+});
+
+export type InspectionReportFormValues = z.infer<typeof inspectionReportSchema>;
+
+export const inspectorOnboardingFormSchema = z.object({
+  bio: z
+    .string()
+    .trim()
+    .min(1, "Tell applicants something about yourself in the bio")
+    .max(1000, "Bio is capped at 1000 characters"),
+  serviceAreas: z
+    .array(z.enum(SUPPORTED_INSPECTOR_SERVICE_AREAS))
+    .min(1, "Select at least one service area you cover")
+    .refine(
+      (areas) => new Set(areas).size === areas.length,
+      "Select each service area only once",
+    ),
+});
+
+export type InspectorOnboardingFormValues = z.infer<typeof inspectorOnboardingFormSchema>;
 
 export type LoginFormValues = z.infer<typeof loginSchema>;
 export type OtpFormValues = z.infer<typeof otpSchema>;
