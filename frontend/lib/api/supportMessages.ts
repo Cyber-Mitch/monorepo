@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/apiClient';
+import { apiGet, withQuery } from '@/lib/apiClient';
 
 export interface SupportMessage {
   id: string;
@@ -21,6 +21,5 @@ export async function fetchSupportMessages(search?: string, page = 1): Promise<S
   if (search) params.append('search', search);
   params.append('page', page.toString());
   
-  const res = await apiClient.get<SupportMessagesResponse>(`/admin/support/messages?${params.toString()}`);
-  return res.data;
+  return apiGet<SupportMessagesResponse>(withQuery(`/admin/support/messages`, Object.fromEntries(params)));
 }

@@ -17,6 +17,9 @@ import {
   Plus,
   Menu,
   X,
+  Briefcase,
+  ClipboardList,
+  Star,
 } from "lucide-react";
 
 type Role = "tenant" | "landlord" | "inspector" | "whistleblower";
@@ -54,6 +57,11 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
     },
     { href: "/dashboard/tenant/credit-score", label: "Credit Score", icon: CreditCard },
     { href: "/dashboard/tenant/referrals", label: "Refer a friend", icon: Gift },
+    {
+      href: "/dashboard/tenant/rating-card",
+      label: "Rating Card",
+      icon: Star,
+    },
     { href: "/dashboard/tenant/settings", label: "Settings", icon: Settings },
   ],
   landlord: [
@@ -67,6 +75,16 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
     { href: "/dashboard/landlord/settings", label: "Settings", icon: Settings },
   ],
   inspector: [
+    {
+      href: "/dashboard/inspector",
+      label: "Job Board",
+      icon: Briefcase,
+    },
+    {
+      href: "/dashboard/inspector/my-jobs",
+      label: "My Jobs",
+      icon: ClipboardList,
+    },
     { href: "/", label: "Back to Home", icon: Home, footer: true },
   ],
   whistleblower: [
@@ -87,6 +105,7 @@ const ROLE_CONFIG: Record<Role, { cardBg: string; cardLabel: string }> = {
 const EXACT_MATCH_PATHS = [
   "/dashboard/tenant",
   "/dashboard/landlord",
+  "/dashboard/inspector",
   "/whistleblower/dashboard",
   "/",
   "/properties",

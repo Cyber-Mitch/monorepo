@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/apiClient';
+import { apiGet, apiPost } from '@/lib/apiClient';
 
 export interface RentGuaranteePolicy {
   id: string;
@@ -18,24 +18,21 @@ export interface QuoteResult {
 }
 
 export async function fetchLandlordPolicies(): Promise<RentGuaranteePolicy[]> {
-  const res = await apiClient.get<RentGuaranteePolicy[]>('/landlord/rent-guarantee/policies');
-  return res.data;
+  return apiGet<RentGuaranteePolicy[]>('/landlord/rent-guarantee/policies');
 }
 
 export async function requestQuote(dealId: string, coverageMonths: number): Promise<QuoteResult> {
-  const res = await apiClient.post<QuoteResult>('/landlord/rent-guarantee/quote', { dealId, coverageMonths });
-  return res.data;
+  return apiPost<QuoteResult>('/landlord/rent-guarantee/quote', { dealId, coverageMonths });
 }
 
 export async function bindPolicy(quoteId: string): Promise<RentGuaranteePolicy> {
-  const res = await apiClient.post<RentGuaranteePolicy>('/landlord/rent-guarantee/bind', { quoteId });
-  return res.data;
+  return apiPost<RentGuaranteePolicy>('/landlord/rent-guarantee/bind', { quoteId });
 }
 
 export async function cancelPolicy(policyId: string): Promise<void> {
-  await apiClient.post(`/landlord/rent-guarantee/policies/${policyId}/cancel`);
+  await apiPost(`/landlord/rent-guarantee/policies/${policyId}/cancel`, {});
 }
 
 export async function fileClaim(policyId: string, claimAmount: string, reason: string): Promise<void> {
-  await apiClient.post(`/landlord/rent-guarantee/policies/${policyId}/claims`, { claimAmount, reason });
+  await apiPost(`/landlord/rent-guarantee/policies/${policyId}/claims`, { claimAmount, reason });
 }

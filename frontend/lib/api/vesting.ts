@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/apiClient';
+import { apiGet, apiPost } from '@/lib/apiClient';
 
 export interface VestingSchedule {
   total: string;
@@ -20,16 +20,13 @@ export interface ClaimSubmitResponse {
 }
 
 export async function fetchVestingSchedule(): Promise<VestingSchedule | null> {
-  const res = await apiClient.get<VestingSchedule | null>('/vesting/me');
-  return res.data;
+  return apiGet<VestingSchedule | null>('/vesting/me');
 }
 
 export async function prepareClaim(): Promise<ClaimPrepareResponse> {
-  const res = await apiClient.post<ClaimPrepareResponse>('/vesting/claim/prepare');
-  return res.data;
+  return apiPost<ClaimPrepareResponse>('/vesting/claim/prepare', {});
 }
 
 export async function submitClaim(signedXdr: string): Promise<ClaimSubmitResponse> {
-  const res = await apiClient.post<ClaimSubmitResponse>('/vesting/claim/submit', { signedXdr });
-  return res.data;
+  return apiPost<ClaimSubmitResponse>('/vesting/claim/submit', { signedXdr });
 }

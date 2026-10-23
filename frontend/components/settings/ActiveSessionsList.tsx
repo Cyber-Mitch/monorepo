@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { fetchSessions, revokeSession, revokeOtherSessions, SessionItem } from '@/lib/api/sessions';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui/button';
 
 export function ActiveSessionsList() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);

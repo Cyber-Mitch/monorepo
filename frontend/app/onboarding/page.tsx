@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -305,6 +306,12 @@ export default function OnboardingPage() {
           </h1>
           <p className="text-gray-500 mt-1">
             Step {currentStepIndex + 1} of {STEPS.length}
+          </p>
+          <p className="mt-3 text-sm text-gray-500">
+            Getting paid to verify listings instead?{" "}
+            <Link href="/onboarding/inspector" className="font-bold text-blue-600 underline">
+              Apply as a property inspector
+            </Link>
           </p>
         </div>
 

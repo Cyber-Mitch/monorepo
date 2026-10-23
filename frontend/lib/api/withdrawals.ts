@@ -1,4 +1,4 @@
-import { apiClient } from '@/lib/apiClient';
+import { apiGet, apiPost, withQuery } from '@/lib/apiClient';
 
 export type WithdrawalStatus = 'pending' | 'approved' | 'rejected';
 
@@ -28,16 +28,13 @@ export async function fetchWithdrawals(status?: string, page = 1): Promise<Withd
   if (status && status !== 'all') params.append('status', status);
   params.append('page', page.toString());
   
-  const res = await apiClient.get<WithdrawalsResponse>(`/admin/withdrawals?${params.toString()}`);
-  return res.data;
+  return apiGet<WithdrawalsResponse>(withQuery(`/admin/withdrawals`, Object.fromEntries(params)));
 }
 
 export async function approveWithdrawal(id: string): Promise<WithdrawalRequest> {
-  const res = await apiClient.post<WithdrawalRequest>(`/admin/withdrawals/${id}/approve`, {});
-  return res.data;
+  return apiPost<WithdrawalRequest>(`/admin/withdrawals/${id}/approve`, {});
 }
 
 export async function rejectWithdrawal(id: string, reason: string): Promise<WithdrawalRequest> {
-  const res = await apiClient.post<WithdrawalRequest>(`/admin/withdrawals/${id}/reject`, { reason });
-  return res.data;
+  return apiPost<WithdrawalRequest>(`/admin/withdrawals/${id}/reject`, { reason });
 }
