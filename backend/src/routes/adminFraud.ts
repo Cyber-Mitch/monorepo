@@ -8,7 +8,10 @@ import { getFraudEngine } from '../fraud/engine.js'
 import { SignalType, RiskLevel, ActionType, EntityType } from '../fraud/types.js'
 import { outboxStore } from '../outbox/store.js'
 import { TxType } from '../outbox/types.js'
-import { requireAdminAccess } from '../middleware/adminAccess.js'
+import { requireAdminAccess, getAdminActor } from '../middleware/adminAccess.js'
+import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
+import { notificationService } from '../services/notificationService.js'
+import { logger } from '../utils/logger.js'
 
 const createSignalSchema = z.object({
   name: z.string().min(1).max(255),
@@ -37,12 +40,25 @@ const evaluateEventSchema = z.object({
 
 const listAssessmentsQuerySchema = z.object({
   riskLevel: z.nativeEnum(RiskLevel).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
+  decision: z.nativeEnum(ActionType).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+})
+
+const listHoldsQuerySchema = z.object({
+  status: z.enum(['active', 'released']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 })
 
 const releaseHoldSchema = z.object({
-  releasedBy: z.string().min(1),
+  reason: z.string().min(1).max(1000),
 })
 
 const updateThresholdsSchema = z.object({
@@ -229,7 +245,7 @@ export function createAdminFraudRouter() {
 
   /**
    * GET /api/admin/fraud/assessments
-   * List fraud assessments
+   * List fraud assessments (newest first) with optional filters
    */
   router.get(
     '/assessments',
@@ -237,8 +253,20 @@ export function createAdminFraudRouter() {
     validate(listAssessmentsQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const { riskLevel, limit, offset } = req.query as unknown as z.infer<typeof listAssessmentsQuerySchema>
-        const assessments = await getFraudStore().listAssessments({ riskLevel, limit, offset })
+        const q = req.query as unknown as z.infer<typeof listAssessmentsQuerySchema>
+
+        // page/pageSize take priority; fall back to limit/offset
+        const pageSize = q.pageSize ?? q.limit ?? 50
+        const offset = q.page ? (q.page - 1) * pageSize : q.offset ?? 0
+
+        const assessments = await getFraudStore().listAssessments({
+          riskLevel: q.riskLevel,
+          decision: q.decision,
+          from: q.from ? new Date(q.from) : undefined,
+          to: q.to ? new Date(q.to) : undefined,
+          limit: pageSize,
+          offset,
+        })
         res.json({ assessments })
       } catch (err) {
         next(err)
@@ -285,6 +313,34 @@ export function createAdminFraudRouter() {
   // ---------------------------------------------------------------------------
 
   /**
+   * GET /api/admin/fraud/holds
+   * List holds for the review queue (newest first)
+   */
+  router.get(
+    '/holds',
+    requireAdminAccess('fraud', 'view'),
+    validate(listHoldsQuerySchema, 'query'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const q = req.query as unknown as z.infer<typeof listHoldsQuerySchema>
+
+        // page/pageSize take priority; fall back to limit/offset
+        const pageSize = q.pageSize ?? q.limit ?? 50
+        const offset = q.page ? (q.page - 1) * pageSize : q.offset ?? 0
+
+        const holds = await getFraudStore().listHolds({
+          status: q.status,
+          limit: pageSize,
+          offset,
+        })
+        res.json({ holds })
+      } catch (err) {
+        next(err)
+      }
+    },
+  )
+
+  /**
    * GET /api/admin/fraud/holds/:accountId
    * Get active holds for an account
    */
@@ -298,18 +354,59 @@ export function createAdminFraudRouter() {
   })
 
   /**
-   * POST /api/admin/fraud/holds/:holdId/release
-   * Release an account hold
+   * POST /api/admin/fraud/holds/:id/release
+   * Release an account hold with a reason, audit-logged with the acting admin
+   * and the affected user notified.
    */
   router.post(
-    '/holds/:holdId/release',
-    requireAdminAccess('fraud', 'manage'),
+    '/holds/:id/release',
+    requireAdminAccess('fraud', 'manage', { audit: false }),
     validate(releaseHoldSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const { releasedBy } = req.body as z.infer<typeof releaseHoldSchema>
-        await getFraudStore().releaseHold(req.params.holdId, releasedBy)
-        res.json({ success: true })
+        const { reason } = req.body as z.infer<typeof releaseHoldSchema>
+        const adminId = getAdminActor(req).id
+
+        let hold
+        try {
+          hold = await getFraudStore().releaseHold(req.params.id, adminId, reason)
+        } catch (storeErr) {
+          const msg = storeErr instanceof Error ? storeErr.message : String(storeErr)
+          if (msg.includes('not found')) {
+            throw new AppError(ErrorCode.NOT_FOUND, 404, `Hold ${req.params.id} not found`)
+          }
+          if (msg.includes('already released')) {
+            throw new AppError(ErrorCode.CONFLICT, 409, `Hold ${req.params.id} already released`)
+          }
+          throw storeErr
+        }
+
+        // Audit log with the acting admin and release reason
+        auditLog('ADMIN_OPERATION', extractAuditContext(req, 'admin'), {
+          resource: 'fraud',
+          action: 'manage',
+          holdId: hold.id,
+          accountId: hold.accountId,
+          reason,
+          adminId,
+        })
+
+        // Notify the affected user
+        try {
+          await notificationService.create(hold.accountId, {
+            category: 'fraud_hold_released',
+            title: 'Account hold released',
+            body: `Your account hold has been released by an administrator. Reason: ${reason}`,
+          })
+        } catch (notifErr) {
+          logger.warn('Failed to notify user of hold release', {
+            holdId: hold.id,
+            accountId: hold.accountId,
+            error: notifErr instanceof Error ? notifErr.message : String(notifErr),
+          })
+        }
+
+        res.json({ success: true, hold })
       } catch (err) {
         next(err)
       }

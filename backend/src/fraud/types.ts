@@ -81,5 +81,6 @@ export interface AccountHold {
   holdReason: string
   releasedAt: Date | null
   releasedBy: string | null
+  releaseReason: string | null
   createdAt: Date
 }

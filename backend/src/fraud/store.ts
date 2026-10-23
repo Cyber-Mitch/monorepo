@@ -32,12 +32,21 @@ export interface FraudStore {
   ): Promise<FraudAssessment>
   getAssessment(id: string): Promise<FraudAssessment | null>
   getAssessmentsByEntity(entityType: EntityType, entityId: string, limit?: number): Promise<FraudAssessment[]>
-  listAssessments(filters?: { riskLevel?: RiskLevel; limit?: number; offset?: number }): Promise<FraudAssessment[]>
+  listAssessments(filters?: {
+    riskLevel?: RiskLevel
+    decision?: ActionType
+    from?: Date
+    to?: Date
+    limit?: number
+    offset?: number
+  }): Promise<FraudAssessment[]>
 
   // Account holds
   createAccountHold(accountId: string, assessmentId: string, holdType: string, holdReason: string): Promise<AccountHold>
   getActiveHolds(accountId: string): Promise<AccountHold[]>
-  releaseHold(holdId: string, releasedBy: string): Promise<void>
+  getHold(holdId: string): Promise<AccountHold | null>
+  listHolds(filters?: { status?: 'active' | 'released'; limit?: number; offset?: number }): Promise<AccountHold[]>
+  releaseHold(holdId: string, releasedBy: string, reason?: string): Promise<AccountHold>
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +160,26 @@ export class InMemoryFraudStore implements FraudStore {
     return results.map(a => ({ ...a }))
   }
 
-  async listAssessments(filters?: { riskLevel?: RiskLevel; limit?: number; offset?: number }): Promise<FraudAssessment[]> {
+  async listAssessments(filters?: {
+    riskLevel?: RiskLevel
+    decision?: ActionType
+    from?: Date
+    to?: Date
+    limit?: number
+    offset?: number
+  }): Promise<FraudAssessment[]> {
     let results = Array.from(this.assessments.values())
     if (filters?.riskLevel) {
       results = results.filter(a => a.riskLevel === filters.riskLevel)
+    }
+    if (filters?.decision) {
+      results = results.filter(a => a.actionTaken === filters.decision)
+    }
+    if (filters?.from) {
+      results = results.filter(a => a.assessedAt >= filters.from!)
+    }
+    if (filters?.to) {
+      results = results.filter(a => a.assessedAt <= filters.to!)
     }
     const offset = filters?.offset ?? 0
     const limit = filters?.limit ?? 50
@@ -173,6 +198,7 @@ export class InMemoryFraudStore implements FraudStore {
       holdReason,
       releasedAt: null,
       releasedBy: null,
+      releaseReason: null,
       createdAt: new Date(),
     }
     this.holds.set(hold.id, hold)
@@ -185,12 +211,34 @@ export class InMemoryFraudStore implements FraudStore {
       .map(h => ({ ...h }))
   }
 
-  async releaseHold(holdId: string, releasedBy: string): Promise<void> {
+  async getHold(holdId: string): Promise<AccountHold | null> {
     const hold = this.holds.get(holdId)
-    if (hold) {
-      hold.releasedAt = new Date()
-      hold.releasedBy = releasedBy
+    return hold ? { ...hold } : null
+  }
+
+  async listHolds(filters?: { status?: 'active' | 'released'; limit?: number; offset?: number }): Promise<AccountHold[]> {
+    let results = Array.from(this.holds.values())
+    if (filters?.status === 'active') {
+      results = results.filter(h => h.releasedAt === null)
+    } else if (filters?.status === 'released') {
+      results = results.filter(h => h.releasedAt !== null)
     }
+    const offset = filters?.offset ?? 0
+    const limit = filters?.limit ?? 50
+    return results
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(offset, offset + limit)
+      .map(h => ({ ...h }))
+  }
+
+  async releaseHold(holdId: string, releasedBy: string, reason?: string): Promise<AccountHold> {
+    const hold = this.holds.get(holdId)
+    if (!hold) throw new Error(`Hold ${holdId} not found`)
+    if (hold.releasedAt) throw new Error(`Hold ${holdId} already released`)
+    hold.releasedAt = new Date()
+    hold.releasedBy = releasedBy
+    hold.releaseReason = reason ?? null
+    return { ...hold }
   }
 }
 
@@ -236,6 +284,7 @@ function rowToHold(row: Record<string, unknown>): AccountHold {
     holdReason: row.hold_reason as string,
     releasedAt: row.released_at ? new Date(row.released_at as string) : null,
     releasedBy: (row.released_by as string | null) ?? null,
+    releaseReason: (row.release_reason as string | null) ?? null,
     createdAt: new Date(row.created_at as string),
   }
 }
@@ -400,17 +449,38 @@ export class PostgresFraudStore implements FraudStore {
     return result.rows.map(rowToAssessment)
   }
 
-  async listAssessments(filters?: { riskLevel?: RiskLevel; limit?: number; offset?: number }): Promise<FraudAssessment[]> {
+  async listAssessments(filters?: {
+    riskLevel?: RiskLevel
+    decision?: ActionType
+    from?: Date
+    to?: Date
+    limit?: number
+    offset?: number
+  }): Promise<FraudAssessment[]> {
     const pool = await getPool()
     if (!pool) return []
 
     const params: unknown[] = []
-    let where = ''
+    const conditions: string[] = []
 
     if (filters?.riskLevel) {
       params.push(filters.riskLevel)
-      where = `WHERE risk_level = $${params.length}`
+      conditions.push(`risk_level = $${params.length}`)
     }
+    if (filters?.decision) {
+      params.push(filters.decision)
+      conditions.push(`action_taken = $${params.length}`)
+    }
+    if (filters?.from) {
+      params.push(filters.from)
+      conditions.push(`assessed_at >= $${params.length}`)
+    }
+    if (filters?.to) {
+      params.push(filters.to)
+      conditions.push(`assessed_at <= $${params.length}`)
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
     params.push(filters?.limit ?? 50)
     params.push(filters?.offset ?? 0)
@@ -450,16 +520,54 @@ export class PostgresFraudStore implements FraudStore {
     return result.rows.map(rowToHold)
   }
 
-  async releaseHold(holdId: string, releasedBy: string): Promise<void> {
+  async getHold(holdId: string): Promise<AccountHold | null> {
     const pool = await getPool()
-    if (!pool) return
+    if (!pool) return null
 
-    await pool.query(
-      `UPDATE fraud_account_holds
-       SET released_at = NOW(), released_by = $1
-       WHERE id = $2`,
-      [releasedBy, holdId],
+    const result = await pool.query('SELECT * FROM fraud_account_holds WHERE id = $1', [holdId])
+    return result.rows[0] ? rowToHold(result.rows[0]) : null
+  }
+
+  async listHolds(filters?: { status?: 'active' | 'released'; limit?: number; offset?: number }): Promise<AccountHold[]> {
+    const pool = await getPool()
+    if (!pool) return []
+
+    const params: unknown[] = []
+    let where = ''
+
+    if (filters?.status === 'active') {
+      where = 'WHERE released_at IS NULL'
+    } else if (filters?.status === 'released') {
+      where = 'WHERE released_at IS NOT NULL'
+    }
+
+    params.push(filters?.limit ?? 50)
+    params.push(filters?.offset ?? 0)
+
+    const result = await pool.query(
+      `SELECT * FROM fraud_account_holds ${where}
+       ORDER BY created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
     )
+    return result.rows.map(rowToHold)
+  }
+
+  async releaseHold(holdId: string, releasedBy: string, reason?: string): Promise<AccountHold> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database not available')
+
+    const result = await pool.query(
+      `UPDATE fraud_account_holds
+       SET released_at = NOW(), released_by = $1, release_reason = $2
+       WHERE id = $3 AND released_at IS NULL
+       RETURNING *`,
+      [releasedBy, reason ?? null, holdId],
+    )
+    if (result.rows.length === 0) {
+      throw new Error(`Hold ${holdId} not found or already released`)
+    }
+    return rowToHold(result.rows[0])
   }
 }
 

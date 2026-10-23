@@ -3243,152 +3243,225 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-  /api/admin/abuse/events:
+  /api/admin/fraud/assessments:
     get:
-      summary: List abuse detection events
-      description: Returns a list of abuse detection events (credential stuffing, scraping, deal spam, manual blocks). Events are filtered by type and target if provided. Requires the abuse:manage permission.
-      operationId: listAbuseEvents
+      summary: List fraud assessments
+      description: |
+        Returns fraud assessments newest first, with optional filtering by risk
+        level, decision (action taken), and date range. Supports page-based
+        pagination via `page` and `pageSize` (or legacy `limit`/`offset`).
+      operationId: listFraudAssessments
       tags:
         - Admin
       security:
         - bearerAdminAuth: []
       parameters:
-        - name: type
+        - name: riskLevel
           in: query
-          description: Filter by event type
           schema:
             type: string
-            enum: [credential_stuffing, scraping, deal_spam, manual_block]
-        - name: target
+            enum: [low, medium, high, critical]
+        - name: decision
           in: query
-          description: Filter by target (IP address or user ID)
+          description: Filter by the action taken during assessment
           schema:
             type: string
+            enum: [none, hold, block, review_queue]
+        - name: from
+          in: query
+          description: Only assessments assessed at or after this ISO 8601 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Only assessments assessed at or before this ISO 8601 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
-          description: Abuse events listed successfully
+          description: A page of fraud assessments
           content:
             application/json:
               schema:
                 type: object
                 required:
-                  - events
+                  - assessments
                 properties:
-                  events:
+                  assessments:
                     type: array
                     items:
                       type: object
-                      required:
-                        - id
-                        - target
-                        - type
-                        - timestamp
-                        - expiresAt
                       properties:
                         id:
                           type: string
-                          format: uuid
-                          description: Event ID
-                        target:
+                        entityType:
                           type: string
-                          description: IP address or user ID
-                        type:
+                          enum: [account, payment, transaction]
+                        entityId:
                           type: string
-                          enum: [credential_stuffing, scraping, deal_spam, manual_block]
-                        timestamp:
+                        totalScore:
+                          type: integer
+                        riskLevel:
+                          type: string
+                          enum: [low, medium, high, critical]
+                        actionTaken:
+                          type: string
+                          enum: [none, hold, block, review_queue]
+                          nullable: true
+                        signalMatches:
+                          type: array
+                          items:
+                            type: object
+                        context:
+                          type: object
+                        assessedAt:
                           type: string
                           format: date-time
-                          description: When the event occurred
-                        expiresAt:
+                        createdAt:
                           type: string
                           format: date-time
-                          description: When the event expires
-                        reason:
-                          type: string
-                          description: Reason for manual blocks
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         default:
           $ref: '#/components/responses/Error'
 
-  /api/admin/abuse/blocks:
+  /api/admin/fraud/holds:
     get:
-      summary: List active abuse blocks
-      description: Returns a list of currently active blocks (IPs and users). Blocks are filtered by targetType and type if provided. Requires the abuse:manage permission.
-      operationId: listAbuseBlocks
+      summary: List fraud account holds
+      description: |
+        Returns account holds for the fraud review queue, newest first.
+        Filter by `status` (`active` or `released`) and paginate with `page`
+        and `pageSize` (or legacy `limit`/`offset`).
+      operationId: listFraudHolds
       tags:
         - Admin
       security:
         - bearerAdminAuth: []
       parameters:
-        - name: targetType
+        - name: status
           in: query
-          description: Filter by target type
           schema:
             type: string
-            enum: [ip, user]
-        - name: type
+            enum: [active, released]
+        - name: page
           in: query
-          description: Filter by block type
           schema:
-            type: string
-            enum: [credential_stuffing, scraping, deal_spam, manual_block]
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
-          description: Active blocks listed successfully
+          description: A page of account holds
           content:
             application/json:
               schema:
                 type: object
                 required:
-                  - blocks
+                  - holds
                 properties:
-                  blocks:
+                  holds:
                     type: array
                     items:
                       type: object
-                      required:
-                        - target
-                        - targetType
-                        - type
-                        - expiresAt
-                        - blockedAt
                       properties:
-                        target:
+                        id:
                           type: string
-                          description: IP address or user ID
-                        targetType:
+                        accountId:
                           type: string
-                          enum: [ip, user]
-                        type:
+                        assessmentId:
                           type: string
-                          enum: [credential_stuffing, scraping, deal_spam, manual_block]
-                        expiresAt:
+                        holdType:
                           type: string
-                          format: date-time
-                          description: When the block expires
-                        reason:
+                          enum: [full, partial, transaction_limit]
+                        holdReason:
                           type: string
-                          description: Reason for manual blocks
-                        blockedBy:
-                          type: string
-                          description: Admin user ID who created the block
-                        blockedAt:
+                        releasedAt:
                           type: string
                           format: date-time
-                          description: When the block was created
+                          nullable: true
+                        releasedBy:
+                          type: string
+                          nullable: true
+                        releaseReason:
+                          type: string
+                          nullable: true
+                        createdAt:
+                          type: string
+                          format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         default:
           $ref: '#/components/responses/Error'
+
+  /api/admin/fraud/holds/{id}/release:
     post:
-      summary: Create manual block
-      description: Manually blocks an IP address or user account for a specified duration. Requires the abuse:manage permission.
-      operationId: createManualBlock
+      summary: Release a fraud account hold
+      description: |
+        Releases an active hold, recording the acting admin and the reason.
+        The operation is audit-logged and the affected user is notified.
+      operationId: releaseFraudHold
       tags:
         - Admin
       security:
         - bearerAdminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -3396,108 +3469,72 @@ paths:
             schema:
               type: object
               required:
-                - target
-                - targetType
                 - reason
-                - expiryHours
               properties:
-                target:
-                  type: string
-                  description: IP address or user ID to block
-                  example: "127.0.0.1"
-                targetType:
-                  type: string
-                  enum: [ip, user]
-                  description: Type of target
                 reason:
                   type: string
-                  maxLength: 500
-                  description: Reason for the block
-                  example: "Suspicious activity detected"
-                expiryHours:
-                  type: integer
-                  minimum: 1
-                  maximum: 8760
-                  description: Block duration in hours (max 1 year)
-                  example: 24
+                  minLength: 1
+                  maxLength: 1000
+                  description: The reason for releasing the hold
+                  example: "Cleared after manual review"
       responses:
         '200':
-          description: Block created successfully
+          description: Hold released successfully
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - success
-                  - target
-                  - targetType
-                  - expiresAt
+                  - hold
                 properties:
                   success:
                     type: boolean
                     example: true
-                  target:
-                    type: string
-                  targetType:
-                    type: string
-                  expiresAt:
-                    type: string
-                    format: date-time
+                  hold:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      accountId:
+                        type: string
+                      assessmentId:
+                        type: string
+                      holdType:
+                        type: string
+                        enum: [full, partial, transaction_limit]
+                      holdReason:
+                        type: string
+                      releasedAt:
+                        type: string
+                        format: date-time
+                      releasedBy:
+                        type: string
+                      releaseReason:
+                        type: string
+                      createdAt:
+                        type: string
+                        format: date-time
         '400':
           $ref: '#/components/responses/ValidationError'
         '403':
-          $ref: '#/components/responses/Forbidden'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/admin/abuse/blocks/{target}:
-    delete:
-      summary: Remove block
-      description: Removes an active block for an IP address or user. Requires the abuse:manage permission.
-      operationId: removeBlock
-      tags:
-        - Admin
-      security:
-        - bearerAdminAuth: []
-      parameters:
-        - name: target
-          in: path
-          required: true
-          description: IP address or user ID to unblock
-          schema:
-            type: string
-        - name: targetType
-          in: query
-          required: true
-          description: Type of target (ip or user)
-          schema:
-            type: string
-            enum: [ip, user]
-      responses:
-        '200':
-          description: Block removed successfully
+          description: Forbidden
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - success
-                  - target
-                  - targetType
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  target:
-                    type: string
-                  targetType:
-                    type: string
-        '400':
-          $ref: '#/components/responses/ValidationError'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/Error'
+          description: Hold not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Hold already released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         default:
           $ref: '#/components/responses/Error'
 

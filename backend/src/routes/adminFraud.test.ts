@@ -24,6 +24,8 @@ vi.mock('../fraud/store.js', () => ({
     listAssessments: vi.fn(),
     createAccountHold: vi.fn(),
     getActiveHolds: vi.fn(),
+    getHold: vi.fn(),
+    listHolds: vi.fn(),
     releaseHold: vi.fn(),
   })),
 }))
@@ -47,6 +49,31 @@ vi.mock('../db.js', () => ({
   getPool: vi.fn(async () => null),
   setPool: vi.fn(),
   getPoolMetrics: vi.fn(() => null),
+}))
+
+vi.mock('../services/notificationService.js', () => ({
+  notificationService: {
+    create: vi.fn().mockResolvedValue('notif-id'),
+  },
+}))
+
+vi.mock('../utils/auditLogger.js', () => ({
+  auditLog: vi.fn(),
+  extractAuditContext: vi.fn(() => ({
+    userId: 'admin-1',
+    requestId: 'test-request-id',
+    ip: '127.0.0.1',
+    actorType: 'admin',
+  })),
+}))
+
+vi.mock('../utils/logger.js', () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
 }))
 
 function buildApp() {
@@ -408,6 +435,47 @@ describe('Admin Fraud Routes', () => {
         expect(res.body.assessments).toBeInstanceOf(Array)
       })
 
+      it('should filter by decision (action taken)', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listAssessments: vi.fn().mockResolvedValue([
+            { id: 'a-1', actionTaken: ActionType.HOLD },
+          ]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/assessments?decision=hold')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+        expect(res.body.assessments).toBeInstanceOf(Array)
+      })
+
+      it('should filter by date range with from and to', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listAssessments: vi.fn().mockResolvedValue([]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/assessments?from=2026-01-01T00:00:00Z&to=2026-10-22T00:00:00Z')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+        expect(res.body.assessments).toBeInstanceOf(Array)
+      })
+
+      it('should support page-based pagination', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listAssessments: vi.fn().mockResolvedValue([]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/assessments?page=1&pageSize=20')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+        expect(res.body.assessments).toBeInstanceOf(Array)
+      })
+
       it('should validate limit parameter', async () => {
         const res = await request(buildApp())
           .get('/api/admin/fraud/assessments?limit=300')
@@ -495,6 +563,91 @@ describe('Admin Fraud Routes', () => {
   })
 
   describe('Account Hold Management', () => {
+    describe('GET /api/admin/fraud/holds', () => {
+      it('should list holds for the review queue', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listHolds: vi.fn().mockResolvedValue([
+            {
+              id: 'hold-1',
+              accountId: 'account-1',
+              holdType: 'full',
+              holdReason: 'High risk',
+              releasedAt: null,
+              releasedBy: null,
+              releaseReason: null,
+              createdAt: new Date().toISOString(),
+            },
+          ]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/holds')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+        expect(res.body.holds).toBeInstanceOf(Array)
+        expect(res.body.holds.length).toBeGreaterThan(0)
+      })
+
+      it('should filter holds by active status', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listHolds: vi.fn().mockResolvedValue([
+            { id: 'hold-1', accountId: 'account-1', releasedAt: null },
+          ]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/holds?status=active')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+        expect(res.body.holds).toBeInstanceOf(Array)
+      })
+
+      it('should filter holds by released status', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listHolds: vi.fn().mockResolvedValue([
+            { id: 'hold-2', accountId: 'account-2', releasedAt: '2026-01-01T00:00:00Z' },
+          ]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/holds?status=released')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+        expect(res.body.holds).toBeInstanceOf(Array)
+      })
+
+      it('should support page-based pagination', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          listHolds: vi.fn().mockResolvedValue([]),
+        } as any)
+
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/holds?page=2&pageSize=10')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(200)
+      })
+
+      it('should validate pageSize parameter', async () => {
+        const res = await request(buildApp())
+          .get('/api/admin/fraud/holds?pageSize=300')
+          .set(adminAuthHeader)
+
+        expect(res.status).toBe(400)
+        expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      })
+
+      it('should reject request without authentication', async () => {
+        const res = await request(buildApp()).get('/api/admin/fraud/holds')
+
+        expect(res.status).toBe(401)
+        expect(res.body.error.code).toBe('UNAUTHORIZED')
+      })
+    })
+
     describe('GET /api/admin/fraud/holds/:accountId', () => {
       it('should get active holds for an account', async () => {
         vi.mocked(getFraudStore).mockReturnValue({
@@ -523,26 +676,131 @@ describe('Admin Fraud Routes', () => {
       })
     })
 
-    describe('POST /api/admin/fraud/holds/:holdId/release', () => {
-      it('should release an account hold', async () => {
+    describe('POST /api/admin/fraud/holds/:id/release', () => {
+      it('should release a hold with a reason', async () => {
         vi.mocked(getFraudStore).mockReturnValue({
-          releaseHold: vi.fn().mockResolvedValue(undefined),
+          releaseHold: vi.fn().mockResolvedValue({
+            id: 'hold-1',
+            accountId: 'account-1',
+            holdType: 'full',
+            holdReason: 'High risk',
+            releasedAt: new Date().toISOString(),
+            releasedBy: 'rbac-admin@example.com',
+            releaseReason: 'Cleared after manual review',
+            createdAt: new Date().toISOString(),
+          }),
         } as any)
 
         const res = await request(buildApp())
           .post('/api/admin/fraud/holds/hold-1/release')
           .set(adminAuthHeader)
-          .send({ releasedBy: 'admin-123' })
+          .send({ reason: 'Cleared after manual review' })
 
         expect(res.status).toBe(200)
         expect(res.body.success).toBe(true)
+        expect(res.body.hold).toBeDefined()
+        expect(res.body.hold.id).toBe('hold-1')
+        expect(res.body.hold.releaseReason).toBe('Cleared after manual review')
       })
 
-      it('should validate releasedBy field', async () => {
+      it('should audit log the release with the acting admin', async () => {
+        const { auditLog } = await import('../utils/auditLogger.js')
+
+        vi.mocked(getFraudStore).mockReturnValue({
+          releaseHold: vi.fn().mockResolvedValue({
+            id: 'hold-1',
+            accountId: 'account-1',
+            holdType: 'full',
+            holdReason: 'High risk',
+            releasedAt: new Date().toISOString(),
+            releasedBy: 'rbac-admin@example.com',
+            releaseReason: 'Verified safe',
+            createdAt: new Date().toISOString(),
+          }),
+        } as any)
+
+        const res = await request(buildApp())
+          .post('/api/admin/fraud/holds/hold-1/release')
+          .set(adminAuthHeader)
+          .send({ reason: 'Verified safe' })
+
+        expect(res.status).toBe(200)
+        expect(auditLog).toHaveBeenCalledWith(
+          'ADMIN_OPERATION',
+          expect.any(Object),
+          expect.objectContaining({
+            resource: 'fraud',
+            action: 'manage',
+            holdId: 'hold-1',
+            reason: 'Verified safe',
+          }),
+        )
+      })
+
+      it('should notify the user when a hold is released', async () => {
+        const { notificationService } = await import('../services/notificationService.js')
+
+        vi.mocked(getFraudStore).mockReturnValue({
+          releaseHold: vi.fn().mockResolvedValue({
+            id: 'hold-1',
+            accountId: 'user-123',
+            holdType: 'full',
+            holdReason: 'High risk',
+            releasedAt: new Date().toISOString(),
+            releasedBy: 'rbac-admin@example.com',
+            releaseReason: 'Verified safe',
+            createdAt: new Date().toISOString(),
+          }),
+        } as any)
+
+        const res = await request(buildApp())
+          .post('/api/admin/fraud/holds/hold-1/release')
+          .set(adminAuthHeader)
+          .send({ reason: 'Verified safe' })
+
+        expect(res.status).toBe(200)
+        expect(notificationService.create).toHaveBeenCalledWith(
+          'user-123',
+          expect.objectContaining({
+            category: 'fraud_hold_released',
+            title: 'Account hold released',
+          }),
+        )
+      })
+
+      it('should return 404 for a non-existent hold', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          releaseHold: vi.fn().mockRejectedValue(new Error('Hold non-existent not found')),
+        } as any)
+
+        const res = await request(buildApp())
+          .post('/api/admin/fraud/holds/non-existent/release')
+          .set(adminAuthHeader)
+          .send({ reason: 'test' })
+
+        expect(res.status).toBe(404)
+        expect(res.body.error.code).toBe('NOT_FOUND')
+      })
+
+      it('should return 409 for an already-released hold', async () => {
+        vi.mocked(getFraudStore).mockReturnValue({
+          releaseHold: vi.fn().mockRejectedValue(new Error('Hold hold-1 already released')),
+        } as any)
+
+        const res = await request(buildApp())
+          .post('/api/admin/fraud/holds/hold-1/release')
+          .set(adminAuthHeader)
+          .send({ reason: 'test' })
+
+        expect(res.status).toBe(409)
+        expect(res.body.error.code).toBe('CONFLICT')
+      })
+
+      it('should validate reason field', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/holds/some-hold-id/release')
           .set(adminAuthHeader)
-          .send({}) // Missing releasedBy
+          .send({}) // Missing reason
 
         expect(res.status).toBe(400)
         expect(res.body.error.code).toBe('VALIDATION_ERROR')
@@ -551,7 +809,7 @@ describe('Admin Fraud Routes', () => {
       it('should reject request without authentication', async () => {
         const res = await request(buildApp())
           .post('/api/admin/fraud/holds/some-hold-id/release')
-          .send({ releasedBy: 'admin-123' })
+          .send({ reason: 'test' })
 
         expect(res.status).toBe(401)
         expect(res.body.error.code).toBe('UNAUTHORIZED')
