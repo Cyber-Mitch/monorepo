@@ -1,11 +1,13 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { validate } from '../middleware/validate.js'
 import { idempotency } from '../middleware/idempotency.js'
+import { authenticateToken } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { confirmPaymentSchema } from '../schemas/payment.js'
 import { outboxStore, OutboxSender } from '../outbox/index.js'
 import { SorobanAdapter } from '../soroban/adapter.js'
 import { logger } from '../utils/logger.js'
-import { auditWalletSigningUsed } from '../utils/auditLogger.js'
+import { auditWalletSigningUsed, auditAdminWalletAction } from '../utils/auditLogger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { TxType } from '../outbox/types.js'
@@ -32,6 +34,9 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
    * Confirm an off-chain or on-chain payment and write a USDC receipt to the Soroban ledger.
    * On-chain accounting is standardized in USDC; NGN values are optional metadata.
    *
+   * This endpoint is for manual operator confirmation when automated webhook processing fails.
+   * Requires admin permission 'payments:confirm'.
+   *
    * Flow:
    * 1. Validate request (Zod schema)
    * 2. Build canonical external ref: "{externalRefSource}:{externalRef}"
@@ -41,6 +46,8 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
    */
   router.post(
     '/confirm',
+    authenticateToken,
+    requirePermission('payments', 'confirm'),
     idempotency(),
     validate(confirmPaymentSchema),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -62,6 +69,16 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
           dealId,
           txType,
           requestId: req.requestId,
+          // Manual confirmation by admin
+          manualConfirmation: true,
+        })
+
+        // Audit log: admin payment confirmation action
+        auditAdminWalletAction(req, {
+          action: 'MANUAL_PAYMENT_CONFIRM',
+          dealId,
+          txType,
+          txId: outboxItem.txId,
         })
 
         // Create outbox item (idempotent by source+ref)
@@ -88,15 +105,15 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
           requestId: req.requestId,
         })
 
+        // Attempt immediate on-chain write
+        const sent = await sender.send(outboxItem)
+
         // Audit log: wallet signing used for transaction
         auditWalletSigningUsed(req, {
           dealId,
           txType,
           txId: outboxItem.txId,
         })
-
-        // Attempt immediate on-chain write
-        const sent = await sender.send(outboxItem)
 
         const updatedItem = await outboxStore.getById(outboxItem.id)
         if (!updatedItem) {

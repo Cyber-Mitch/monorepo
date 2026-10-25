@@ -191,19 +191,14 @@ function extractUserId(req: Request): string {
     if (user.sub) return String(user.sub)
   }
   if ((req as any).userId) return String((req as any).userId)
-  const headerUserId = req.headers['x-user-id']
-  if (typeof headerUserId === 'string' && headerUserId) return headerUserId
+  // Only use authenticated principal - do not trust x-user-id header
   return 'anonymous'
 }
 
 function extractIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for']
-  if (typeof forwarded === 'string' && forwarded) {
-    return forwarded.split(',')[0].trim()
-  }
-  const realIp = req.headers['x-real-ip']
-  if (typeof realIp === 'string' && realIp) return realIp
-  return req.socket?.remoteAddress || req.ip || 'unknown'
+  // Use req.ip which respects app.set("trust proxy", 1) configured in app.ts
+  // Do not manually parse x-forwarded-for or x-real-ip as they can be forged
+  return req.ip || 'unknown'
 }
 
 /**

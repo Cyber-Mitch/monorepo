@@ -35,6 +35,10 @@ export interface KycRecord {
 function escapeCsvCell(val: unknown): string {
   if (val === undefined || val === null) return ''
   const str = String(val)
+  // Formula-injection safe: prefix cells beginning with =, +, -, or @ with '
+  if (str.match(/^[=+\-@]/)) {
+    return `'${str}`
+  }
   if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
     return `"${str.replace(/"/g, '""')}"`
   }

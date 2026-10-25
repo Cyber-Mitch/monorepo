@@ -205,7 +205,7 @@ import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSched
 import { createDocsRouter } from "./routes/docs.js";
 import { createListingsRouter } from "./routes/listings.js";
 import { createLeaseAgreementsRouter } from "./routes/leaseAgreements.js";
-import listingApplicationsRouter from "./routes/listingApplications.js";
+import { createListingApplicationsRouter } from "./routes/listingApplications.js";
 import { createKycRouter } from "./routes/kyc.js";
 import { createAdminRolesRouter } from "./routes/adminRoles.js";
 import { createAbuseRouter } from "./routes/abuse.js";
@@ -914,6 +914,8 @@ export function createApp() {
     app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
     app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
     app.use("/api/deposits", createDepositsRouter(conversionService));
+    app.use("/api", createListingApplicationsRouter());
+    app.use("/api/admin/compliance/reports", createComplianceReportRouter());
     app.use("/api/gas-metrics", createGasMetricsRouter());
     app.use("/api", migrationGuideRouter);
     app.use("/api", createComprehensiveRateLimiter());
@@ -1147,6 +1149,7 @@ export function createApp() {
     "/api/v1/whistleblower/applications",
     createWhistleblowerApplicationsRouter(),
   );
+  app.use("/api/v1/admin/compliance/reports", createComplianceReportRouter());
   app.use("/api/tenant/payments", createTenantPaymentsRouter());
   app.use("/api/notifications", createNotificationsRouter());
   app.use("/api/admin", createSettlementAdminRouter());
@@ -1161,7 +1164,7 @@ export function createApp() {
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
   app.use("/api/listings", createListingsRouter());
-  app.use("/api", listingApplicationsRouter);
+  app.use("/api/v1", createListingApplicationsRouter());
   app.use(
     "/api/landlord/payout-schedule",
     createLandlordPayoutScheduleRouter(),
